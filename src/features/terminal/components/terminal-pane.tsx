@@ -129,6 +129,7 @@ export function TerminalPane({
     fitRef.current = fit
 
     let disposed = false
+    let commandTimer: number | null = null
     const cleanups: (() => void | Promise<void>)[] = []
 
     const resize = () => {
@@ -178,7 +179,12 @@ export function TerminalPane({
 
       try {
         resize()
-        await ptySpawn(tab.id, term.cols, term.rows, tab.shell)
+        await ptySpawn(tab.id, term.cols, term.rows, tab.shell, tab.cwd)
+        if (tab.command && isDesktop) {
+          commandTimer = window.setTimeout(() => {
+            if (!disposed) void ptyWrite(tab.id, `${tab.command}\r`).catch(() => undefined)
+          }, 350)
+        }
       } catch {
         if (!disposed) term.writeln('Gagal memulai shell. Periksa pengaturan shell.')
       }
@@ -188,13 +194,14 @@ export function TerminalPane({
 
     return () => {
       disposed = true
+      if (commandTimer !== null) window.clearTimeout(commandTimer)
       observer.disconnect()
       cleanups.forEach((cleanup) => void cleanup())
       term.dispose()
       termRef.current = null
       fitRef.current = null
     }
-  }, [tab.id, tab.shell])
+  }, [tab.id, tab.shell, tab.cwd, tab.command])
 
   useEffect(() => {
     if (active && visibleRef.current) termRef.current?.focus()

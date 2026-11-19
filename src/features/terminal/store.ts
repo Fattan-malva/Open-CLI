@@ -5,13 +5,18 @@ export type TerminalTab = {
   id: string
   title: string
   shell: string
+  cwd?: string
+  command?: string
 }
 
 type TerminalState = {
   tabs: TerminalTab[]
   activeId: string | null
   nextIndex: number
-  add: (shell?: string) => string
+  add: (
+    shell?: string,
+    options?: { title?: string; cwd?: string; command?: string }
+  ) => string
   close: (id: string) => void
   rename: (id: string, title: string) => void
   setActive: (id: string) => void
@@ -24,12 +29,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   tabs: [],
   activeId: null,
   nextIndex: 1,
-  add: (shell = 'powershell.exe') => {
+  add: (shell = 'powershell.exe', options = {}) => {
     const id = `pty-${Date.now()}-${counter++}`
     const tab: TerminalTab = {
       id,
-      title: `Terminal ${get().nextIndex}`,
+      title: options.title?.trim() || `Terminal ${get().nextIndex}`,
       shell,
+      cwd: options.cwd,
+      command: options.command,
     }
     set((state) => ({
       tabs: [...state.tabs, tab],

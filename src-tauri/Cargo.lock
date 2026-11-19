@@ -2226,6 +2226,7 @@ dependencies = [
  "base64 0.22.1",
  "portable-pty",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "winapi",

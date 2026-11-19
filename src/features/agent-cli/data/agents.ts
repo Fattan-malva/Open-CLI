@@ -33,7 +33,7 @@ export const builtInAgents: AgentCliItem[] = [
     icon: opencodeLightIcon,
     darkIcon: opencodeDarkIcon,
     iconClassName: 'size-8',
-    shortcut: ['Ctrl', 'T', 'O'],
+    shortcut: ['Alt', 'O'],
   },
   {
     id: 'claude-code',
@@ -42,7 +42,7 @@ export const builtInAgents: AgentCliItem[] = [
     description: 'Autonomous coding agent',
     icon: claudeIcon,
     iconClassName: 'size-9',
-    shortcut: ['Ctrl', 'T', 'C'],
+    shortcut: ['Alt', 'C'],
   },
   {
     id: 'codex-cli',
@@ -51,7 +51,7 @@ export const builtInAgents: AgentCliItem[] = [
     description: 'AI coding & task execution',
     icon: codexIcon,
     iconClassName: 'size-9',
-    shortcut: ['Ctrl', 'T', 'C'],
+    shortcut: ['Alt', 'X'],
   },
   {
     id: 'gemini-cli',
@@ -60,7 +60,7 @@ export const builtInAgents: AgentCliItem[] = [
     description: 'Coding, analysis & agent',
     icon: geminiIcon,
     iconClassName: 'size-9',
-    shortcut: ['Ctrl', 'T', 'G'],
+    shortcut: ['Alt', 'E'],
   },
   {
     id: 'aider',
@@ -69,7 +69,7 @@ export const builtInAgents: AgentCliItem[] = [
     description: 'AI pair programming + Git',
     icon: aiderIcon,
     iconClassName: 'h-5 w-14',
-    shortcut: ['Ctrl', 'T', 'A'],
+    shortcut: ['Alt', 'A'],
   },
   {
     id: 'qwen-code',
@@ -78,7 +78,7 @@ export const builtInAgents: AgentCliItem[] = [
     description: 'AI coding agent',
     icon: qwenIcon,
     iconClassName: 'size-9',
-    shortcut: ['Ctrl', 'T', 'Q'],
+    shortcut: ['Alt', 'Q'],
   },
   {
     id: 'goose',
@@ -87,7 +87,7 @@ export const builtInAgents: AgentCliItem[] = [
     description: 'General-purpose AI agent',
     icon: gooseIcon,
     iconClassName: 'size-9 dark:invert',
-    shortcut: ['Ctrl', 'T', 'G'],
+    shortcut: ['Alt', 'G'],
   },
   {
     id: 'kilo-cli',
@@ -96,7 +96,7 @@ export const builtInAgents: AgentCliItem[] = [
     description: 'Coding agent dengan mode/workflow',
     icon: kiloIcon,
     iconClassName: 'size-9',
-    shortcut: ['Ctrl', 'T', 'K'],
+    shortcut: ['Alt', 'K'],
   },
   {
     id: 'cline-cli',
@@ -105,7 +105,7 @@ export const builtInAgents: AgentCliItem[] = [
     description: 'Autonomous coding & tools',
     icon: clineIcon,
     iconClassName: 'size-9 dark:invert',
-    shortcut: ['Ctrl', 'T', 'C'],
+    shortcut: ['Alt', 'L'],
   },
   {
     id: 'pi-coding-agent',
@@ -114,7 +114,7 @@ export const builtInAgents: AgentCliItem[] = [
     description: 'Minimal, extensible coding agent',
     icon: piIcon,
     iconClassName: 'size-9',
-    shortcut: ['Ctrl', 'T', 'P'],
+    shortcut: ['Alt', 'P'],
   },
   {
     id: 'command-code',
@@ -124,6 +124,6 @@ export const builtInAgents: AgentCliItem[] = [
     icon: commandCodeLightIcon,
     darkIcon: commandCodeDarkIcon,
     iconClassName: 'h-7 max-w-24',
-    shortcut: ['Ctrl', 'T', 'C'],
+    shortcut: ['Alt', 'M'],
   },
 ]

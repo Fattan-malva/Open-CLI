@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Terminal, Trash2, X } from 'lucide-react'
+import { Bot, FolderOpen, Plus, Terminal, Trash2, X } from 'lucide-react'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
+import { CmdIcon, PowerShellIcon } from '@/components/shell-icons'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,20 +17,61 @@ import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { isDesktop } from '@/lib/platform'
 import { ptyIsBusy, ptyKill } from '@/lib/pty'
+import {
+  loadAgentCliStore,
+  saveAgentCliStore,
+  type AgentCliStoreData,
+} from '@/lib/agent-cli-store'
+import { builtInAgents, type AgentCliItem } from '@/features/agent-cli/data/agents'
+import { ShortcutKeys } from '@/features/agent-cli/components/shortcut-keys'
+import { ProjectPickerDialog } from './components/project-picker-dialog'
 import { TerminalPane } from './components/terminal-pane'
 import { useTerminalStore } from './store'
 
 const shells = [
-  { value: 'powershell.exe', label: 'PowerShell' },
-  { value: 'cmd.exe', label: 'Command Prompt' },
+  {
+    value: 'powershell.exe',
+    label: 'PowerShell',
+    Icon: PowerShellIcon,
+    iconClassName: 'size-4 text-[#5391FE]',
+  },
+  {
+    value: 'cmd.exe',
+    label: 'CMD',
+    Icon: CmdIcon,
+    iconClassName: 'size-4',
+  },
 ]
+
+function AgentOptionIcon({ agent }: { agent: AgentCliItem }) {
+  if (!agent.icon) return <Bot className='size-4 shrink-0' />
+
+  return (
+    <span className='relative flex size-4 shrink-0 items-center justify-center'>
+      <img
+        src={agent.icon}
+        alt=''
+        className={cn('size-4 object-contain', agent.darkIcon && 'dark:hidden')}
+      />
+      {agent.darkIcon ? (
+        <img
+          src={agent.darkIcon}
+          alt=''
+          className='absolute inset-0 hidden size-4 object-contain dark:block'
+        />
+      ) : null}
+    </span>
+  )
+}
 
 const terminalShortcuts = [
   {
@@ -57,6 +99,12 @@ const CLOSE_STEP_MS = 70
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
+}
+
+function projectLabel(path: string | null) {
+  if (!path) return 'Root (default)'
+  const clean = path.replace(/[\\/]+$/, '')
+  return clean.split(/[\\/]/).filter(Boolean).pop() ?? clean
 }
 
 type Layout = {
@@ -131,6 +179,9 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   const rename = useTerminalStore((state) => state.rename)
   const setActive = useTerminalStore((state) => state.setActive)
   const [shell, setShell] = useState('powershell.exe')
+  const [launcher, setLauncher] = useState('powershell.exe')
+  const [agentStore, setAgentStore] = useState<AgentCliStoreData | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [compact, setCompact] = useState(false)
   const [animatedId, setAnimatedId] = useState<string | null>(null)
   const [pendingIds, setPendingIds] = useState<string[]>([])
@@ -157,6 +208,17 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   const lastPositions = useMemo(() => positions(lastWeights), [lastWeights])
   const rowPositions = useMemo(() => positions(rowWeights), [rowWeights])
   const fullRows = layout.lastCount < layout.cols ? layout.rows - 1 : layout.rows
+  const activeAgents = useMemo(() => {
+    if (!agentStore) return []
+    const ids = new Set(agentStore.activeIds)
+    return [...builtInAgents, ...agentStore.customAgents].filter((agent) =>
+      ids.has(agent.id)
+    )
+  }, [agentStore])
+  const selectedAgent = useMemo(() => {
+    if (!launcher.startsWith('agent:')) return null
+    return activeAgents.find((agent) => `agent:${agent.id}` === launcher) ?? null
+  }, [activeAgents, launcher])
 
   useEffect(() => {
     const query = window.matchMedia('(max-width: 900px)')
@@ -170,14 +232,105 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     if (animationTimer.current !== null) window.clearTimeout(animationTimer.current)
   }, [])
 
-  const newTab = useCallback(() => {
-    const id = add(shell)
+  useEffect(() => {
+    if (!visible) return
+
+    let alive = true
+    void loadAgentCliStore().then((data) => {
+      if (!alive) return
+      setAgentStore(data)
+    })
+
+    return () => {
+      alive = false
+    }
+  }, [visible])
+
+  const newTab = useCallback((command?: string, title?: string) => {
+    const id = add(shell, {
+      title,
+      cwd: agentStore?.projectPath ?? undefined,
+      command,
+    })
     setAnimatedId(id)
     if (animationTimer.current !== null) window.clearTimeout(animationTimer.current)
     animationTimer.current = window.setTimeout(() => {
       setAnimatedId((current) => (current === id ? null : current))
     }, 320)
-  }, [add, shell])
+  }, [add, agentStore?.projectPath, shell])
+
+  const addLauncher = useCallback(() => {
+    newTab(selectedAgent?.command, selectedAgent?.name)
+  }, [newTab, selectedAgent])
+
+  const selectProject = useCallback(
+    (path: string | null) => {
+      setAgentStore((current) => ({
+        customAgents: current?.customAgents ?? [],
+        activeIds: current?.activeIds ?? [],
+        projectPath: path,
+      }))
+
+      void loadAgentCliStore()
+        .then((fresh): AgentCliStoreData => ({ ...fresh, projectPath: path }))
+        .then((next) => {
+          setAgentStore(next)
+          return saveAgentCliStore(next)
+        })
+        .catch(() => undefined)
+    },
+    []
+  )
+
+  const launchAgent = useCallback(
+    (agent: AgentCliItem) => {
+      newTab(agent.command, agent.name)
+    },
+    [newTab]
+  )
+
+  const handleLauncherChange = useCallback(
+    (value: string) => {
+      if (!value.startsWith('agent:')) setShell(value)
+      setLauncher(value)
+    },
+    []
+  )
+
+  useEffect(() => {
+    if (!isDesktop) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      if (event.key.length !== 1 || !/^[a-z]$/i.test(event.key)) return
+      if (document.querySelector('[role="dialog"]')) return
+
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input, textarea, [contenteditable="true"]')
+      ) {
+        return
+      }
+
+      const letter = event.key.toUpperCase()
+      const agent = activeAgents.find(
+        (item) => {
+          const keys = item.shortcut
+          return keys?.[keys.length - 1]?.toUpperCase() === letter
+        }
+      )
+      if (!agent) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      launchAgent(agent)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeAgents, launchAgent])
 
   const terminate = useCallback(
     async (ids: string[]) => {
@@ -272,7 +425,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
       ) {
         event.preventDefault()
         event.stopPropagation()
-        newTab()
+        addLauncher()
         return
       }
       if (
@@ -307,7 +460,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [activeId, closeAllByShortcut, closeOneByShortcut, newTab, setActive])
+  }, [activeId, addLauncher, closeAllByShortcut, closeOneByShortcut, setActive])
 
   useEffect(() => {
     if (!drag) return
@@ -379,6 +532,9 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   }
 
   const pendingTabs = tabs.filter((tab) => pendingIds.includes(tab.id))
+  const launcherValue =
+    selectedAgent || !launcher.startsWith('agent:') ? launcher : shell
+  const selectedShell = shells.find((item) => item.value === launcherValue) ?? shells[0]
   const showTerminal = visible
 
   return (
@@ -392,22 +548,89 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
 
       <Main fixed={showTerminal} fluid className='min-h-0 flex-1 overflow-hidden p-0'>
         <div className='flex h-full min-h-0 flex-col'>
-          <div className='flex shrink-0 items-center justify-end gap-2 px-2 py-1.5'>
-            <Select value={shell} onValueChange={setShell}>
-              <SelectTrigger aria-label='Shell' className='h-7 w-36 text-[11px]'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {shells.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className='flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-2 py-1.5'>
+            <div className='flex min-w-0 flex-wrap items-center gap-2'>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => setPickerOpen(true)}
+                title={agentStore?.projectPath ?? undefined}
+                className='h-7 max-w-56 gap-1.5 px-2 text-[11px]'
+              >
+                <FolderOpen className='size-3.5 shrink-0' />
+                <span className='truncate'>
+                  {projectLabel(agentStore?.projectPath ?? null)}
+                </span>
+              </Button>
+
+              <Select value={launcherValue} onValueChange={handleLauncherChange}>
+                <SelectTrigger
+                  aria-label='Jenis terminal'
+                  className='h-7 w-64 text-[11px]'
+                >
+                  <span className='flex min-w-0 items-center gap-2'>
+                    {selectedAgent ? (
+                      <>
+                        <AgentOptionIcon agent={selectedAgent} />
+                        <span className='truncate'>{selectedAgent.name}</span>
+                        <ShortcutKeys
+                          keys={selectedAgent.shortcut}
+                          className='ml-auto shrink-0'
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <selectedShell.Icon
+                          className={selectedShell.iconClassName}
+                        />
+                        <span className='truncate'>{selectedShell.label}</span>
+                      </>
+                    )}
+                  </span>
+                </SelectTrigger>
+                <SelectContent className='max-h-72 [&_[data-radix-select-viewport]]:h-auto [&_[data-radix-select-viewport]]:max-h-64'>
+                  <SelectGroup>
+                    <SelectLabel>Shell</SelectLabel>
+                    {shells.map(({ value, label, Icon, iconClassName }) => (
+                      <SelectItem key={value} value={value}>
+                        <span className='flex items-center gap-2'>
+                          <Icon className={iconClassName} />
+                          {label}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+
+                  <SelectSeparator />
+
+                  <SelectGroup>
+                    <SelectLabel>Agent aktif</SelectLabel>
+                    {activeAgents.length === 0 ? (
+                      <SelectItem value='agent-empty' disabled>
+                        Tidak ada agent aktif
+                      </SelectItem>
+                    ) : (
+                      activeAgents.map((agent) => (
+                        <SelectItem key={agent.id} value={`agent:${agent.id}`}>
+                          <span className='flex min-w-0 flex-1 items-center gap-2'>
+                            <AgentOptionIcon agent={agent} />
+                            <span className='truncate'>{agent.name}</span>
+                            <ShortcutKeys
+                              keys={agent.shortcut}
+                              className='ml-auto shrink-0'
+                            />
+                          </span>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
             <Button
               size='sm'
-              onClick={newTab}
+              onClick={addLauncher}
               className='h-7 gap-1 px-2 text-[11px]'
             >
               <Plus className='size-3.5' />
@@ -433,7 +656,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
                         Mode browser: terminal real hanya tersedia di aplikasi desktop.
                       </p>
                     )}
-                    <Button onClick={newTab} className='mt-4 gap-1'>
+                    <Button onClick={addLauncher} className='mt-4 gap-1'>
                       <Plus className='size-4' />
                       Buat terminal pertama
                     </Button>
@@ -557,6 +780,13 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
           </div>
         </div>
       </Main>
+
+      <ProjectPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        value={agentStore?.projectPath ?? null}
+        onSelect={selectProject}
+      />
 
       <AlertDialog
         open={pendingTabs.length > 0}

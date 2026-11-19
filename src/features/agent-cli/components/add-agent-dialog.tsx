@@ -29,16 +29,18 @@ type AddAgentDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   onAdd: (agent: AgentCliItem) => void
+  usedLetters: string[]
 }
 
 type CaptureStep = 'idle' | 'key'
 
-const DEFAULT_SHORTCUT_BASE = ['Ctrl', 'T']
+const DEFAULT_SHORTCUT_BASE = ['Alt']
 
 export function AddAgentDialog({
   open,
   onOpenChange,
   onAdd,
+  usedLetters,
 }: AddAgentDialogProps) {
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
@@ -152,7 +154,24 @@ export function AddAgentDialog({
     if (event.ctrlKey || event.metaKey || event.altKey) return
     if (['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) return
 
-    setShortcut([...DEFAULT_SHORTCUT_BASE, getKeyLabel(event.key)])
+    if (!/^[a-z]$/i.test(event.key)) {
+      setErrors((previous) => ({
+        ...previous,
+        shortcut: 'Gunakan huruf A-Z untuk shortcut agent.',
+      }))
+      return
+    }
+
+    const letter = event.key.toUpperCase()
+    if (usedLetters.includes(letter)) {
+      setErrors((previous) => ({
+        ...previous,
+        shortcut: `Alt + ${letter} sudah dipakai agent lain.`,
+      }))
+      return
+    }
+
+    setShortcut([...DEFAULT_SHORTCUT_BASE, letter])
     setCaptureStep('idle')
     clearError('shortcut')
     shortcutRef.current?.blur()
@@ -169,6 +188,11 @@ export function AddAgentDialog({
     if (!cleanCommand) nextErrors.command = 'Command menjalankan wajib diisi.'
     if (shortcut.length !== DEFAULT_SHORTCUT_BASE.length + 1) {
       nextErrors.shortcut = 'Tekan 1 huruf untuk melengkapi shortcut.'
+    } else {
+      const letter = shortcut[shortcut.length - 1]?.toUpperCase()
+      if (letter && usedLetters.includes(letter)) {
+        nextErrors.shortcut = `Alt + ${letter} sudah dipakai agent lain.`
+      }
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -327,8 +351,8 @@ export function AddAgentDialog({
               )}
             </div>
             <p className='text-xs text-muted-foreground'>
-              Klik kolom lalu tekan huruf agent, misalnya O. Esc untuk
-              mengulang.
+              Shortcut otomatis Alt + huruf. Klik kolom lalu tekan huruf agent,
+              misalnya O. Esc untuk mengulang.
             </p>
             {errors.shortcut && (
               <p className='text-xs text-destructive'>{errors.shortcut}</p>
@@ -347,11 +371,4 @@ export function AddAgentDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-function getKeyLabel(key: string) {
-  if (key === ' ') return 'Space'
-  if (key === 'Escape') return 'Esc'
-  if (key.startsWith('Arrow')) return key.replace('Arrow', '')
-  return key.length === 1 ? key.toUpperCase() : key
 }

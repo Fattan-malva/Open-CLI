@@ -5,68 +5,61 @@ import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { loadAgentCliStore, saveAgentCliStore } from '@/lib/agent-cli-store'
 import { AgentCard } from './components/agent-card'
 import { AddAgentDialog } from './components/add-agent-dialog'
 import { builtInAgents, type AgentCliItem } from './data/agents'
 
-const STORAGE_KEY = 'open-cli:agent-cli-custom'
-
-function loadCustomAgents(): AgentCliItem[] {
-  if (typeof window === 'undefined') return []
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-
-    return parsed
-      .filter(
-        (item): item is Record<string, unknown> =>
-          typeof item === 'object' && item !== null
-      )
-      .filter(
-        (item) =>
-          typeof item.id === 'string' &&
-          typeof item.name === 'string' &&
-          typeof item.command === 'string'
-      )
-      .map((item) => ({
-        id: item.id as string,
-        name: item.name as string,
-        command: item.command as string,
-        description:
-          typeof item.description === 'string'
-            ? item.description
-            : 'Agent CLI kustom ditambahkan manual.',
-        icon: typeof item.icon === 'string' ? item.icon : undefined,
-        shortcut: Array.isArray(item.shortcut)
-          ? item.shortcut.filter((key): key is string => typeof key === 'string')
-          : undefined,
-        custom: true,
-      }))
-  } catch {
-    return []
-  }
-}
-
 export function AgentCli() {
   const [open, setOpen] = useState(false)
-  const [customAgents, setCustomAgents] = useState<AgentCliItem[]>(loadCustomAgents)
+  const [customAgents, setCustomAgents] = useState<AgentCliItem[]>([])
   const [activeIds, setActiveIds] = useState<Set<string>>(() => new Set())
+  const [hydrated, setHydrated] = useState(false)
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(customAgents))
-    } catch {
-      toast.error('Gagal menyimpan agent kustom di penyimpanan lokal.')
+    let alive = true
+
+    void loadAgentCliStore().then((data) => {
+      if (!alive) return
+      setCustomAgents(data.customAgents)
+      setActiveIds(new Set(data.activeIds))
+      setHydrated(true)
+    })
+
+    return () => {
+      alive = false
     }
-  }, [customAgents])
+  }, [])
+
+  useEffect(() => {
+    if (!hydrated) return
+
+    void loadAgentCliStore()
+      .then((fresh) =>
+        saveAgentCliStore({
+          ...fresh,
+          customAgents,
+          activeIds: [...activeIds],
+        })
+      )
+      .catch(() => {
+        toast.error('Gagal menyimpan data Agent CLI ke file JSON.')
+      })
+  }, [activeIds, customAgents, hydrated])
 
   const agents = useMemo(
     () => [...builtInAgents, ...customAgents],
     [customAgents]
+  )
+  const usedLetters = useMemo(
+    () =>
+      agents
+        .map((agent) => {
+          const keys = agent.shortcut
+          return keys?.[keys.length - 1]?.toUpperCase()
+        })
+        .filter((letter): letter is string => Boolean(letter)),
+    [agents]
   )
 
   const addAgent = (agent: AgentCliItem) => {
@@ -152,7 +145,12 @@ export function AgentCli() {
         </div>
       </Main>
 
-      <AddAgentDialog open={open} onOpenChange={setOpen} onAdd={addAgent} />
+      <AddAgentDialog
+        open={open}
+        onOpenChange={setOpen}
+        onAdd={addAgent}
+        usedLetters={usedLetters}
+      />
     </>
   )
 }

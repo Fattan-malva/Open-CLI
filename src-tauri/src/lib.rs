@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 #[cfg(windows)]
 use std::collections::HashSet;
+use std::fs;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 
@@ -9,6 +11,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, WindowEvent,
 };
@@ -47,6 +50,18 @@ use winapi::um::winnt::{
 struct PtyEvent {
     id: String,
     data: String,
+}
+
+const AGENT_CLI_FILE: &str = "cli-agent.json";
+const EMPTY_AGENT_CLI_JSON: &str =
+    "{\"customAgents\":[],\"activeIds\":[],\"projectPath\":null}";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FsEntry {
+    name: String,
+    path: String,
+    kind: String,
 }
 
 #[cfg(windows)]
@@ -635,6 +650,101 @@ async fn browser_tabs_close_all(app: AppHandle) -> Result<(), String> {
     .map_err(|error| error.to_string())?
 }
 
+fn agent_cli_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let root = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    Ok(root.join("data").join(AGENT_CLI_FILE))
+}
+
+fn ensure_agent_cli_file(app: &AppHandle) -> Result<PathBuf, String> {
+    let path = agent_cli_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    if !path.exists() {
+        fs::write(&path, EMPTY_AGENT_CLI_JSON).map_err(|error| error.to_string())?;
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn agent_cli_read(app: AppHandle) -> Result<String, String> {
+    let path = ensure_agent_cli_file(&app)?;
+    fs::read_to_string(path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn agent_cli_write(app: AppHandle, contents: String) -> Result<(), String> {
+    serde_json::from_str::<JsonValue>(&contents).map_err(|error| error.to_string())?;
+    let path = ensure_agent_cli_file(&app)?;
+    fs::write(path, contents).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn fs_list_drives() -> Result<Vec<FsEntry>, String> {
+    let mut entries = Vec::new();
+
+    #[cfg(windows)]
+    for code in b'A'..=b'Z' {
+        let path = format!("{}:\\", code as char);
+        if Path::new(&path).exists() {
+            entries.push(FsEntry {
+                name: path.clone(),
+                path,
+                kind: "drive".to_string(),
+            });
+        }
+    }
+
+    #[cfg(not(windows))]
+    entries.push(FsEntry {
+        name: "/".to_string(),
+        path: "/".to_string(),
+        kind: "drive".to_string(),
+    });
+
+    Ok(entries)
+}
+
+#[tauri::command]
+fn fs_list_folders(path: String, query: Option<String>) -> Result<Vec<FsEntry>, String> {
+    let target = if path.trim().is_empty() {
+        #[cfg(windows)]
+        {
+            "C:\\".to_string()
+        }
+        #[cfg(not(windows))]
+        {
+            "/".to_string()
+        }
+    } else {
+        path
+    };
+
+    let needle = query.unwrap_or_default().trim().to_lowercase();
+    let mut entries = Vec::new();
+
+    for item in fs::read_dir(&target).map_err(|error| error.to_string())? {
+        let item = item.map_err(|error| error.to_string())?;
+        if !item.file_type().map_err(|error| error.to_string())?.is_dir() {
+            continue;
+        }
+
+        let name = item.file_name().to_string_lossy().to_string();
+        if !needle.is_empty() && !name.to_lowercase().contains(&needle) {
+            continue;
+        }
+
+        entries.push(FsEntry {
+            path: item.path().to_string_lossy().to_string(),
+            name,
+            kind: "folder".to_string(),
+        });
+    }
+
+    entries.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    Ok(entries.into_iter().take(300).collect())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(PtyState::default())
@@ -651,8 +761,18 @@ pub fn run() {
             browser_tab_navigate,
             browser_tab_sync,
             browser_tab_close,
-            browser_tabs_close_all
+            browser_tabs_close_all,
+            agent_cli_read,
+            agent_cli_write,
+            fs_list_drives,
+            fs_list_folders
         ])
+        .setup(|app| {
+            if let Err(error) = ensure_agent_cli_file(app.handle()) {
+                eprintln!("Gagal menyiapkan data/cli-agent.json: {}", error);
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {
                 let state = window.state::<PtyState>();
