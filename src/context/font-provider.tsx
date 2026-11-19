@@ -1,0 +1,59 @@
+import { createContext, useContext, useEffect, useState } from 'react'
+import { fonts } from '@/config/fonts'
+import { createCookieStore, COOKIE_KEYS } from '@/lib/cookie-store'
+
+type Font = (typeof fonts)[number]
+
+const FONT_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+
+const fontStore = createCookieStore<Font>({
+  key: COOKIE_KEYS.FONT,
+  defaultValue: fonts[0],
+  maxAge: FONT_COOKIE_MAX_AGE,
+})
+
+type FontContextType = {
+  font: Font
+  setFont: (font: Font) => void
+  resetFont: () => void
+}
+
+const FontContext = createContext<FontContextType | null>(null)
+
+export function FontProvider({ children }: { children: React.ReactNode }) {
+  const [font, _setFont] = useState<Font>(() => fontStore.get())
+
+  useEffect(() => {
+    const applyFont = (font: string) => {
+      const root = document.documentElement
+      root.classList.forEach((cls) => {
+        if (cls.startsWith('font-')) root.classList.remove(cls)
+      })
+      root.classList.add(`font-${font}`)
+    }
+
+    applyFont(font)
+  }, [font])
+
+  const setFont = (font: Font) => {
+    fontStore.set(font)
+    _setFont(font)
+  }
+
+  const resetFont = () => {
+    fontStore.remove()
+    _setFont(fonts[0])
+  }
+
+  return (
+    <FontContext value={{ font, setFont, resetFont }}>{children}</FontContext>
+  )
+}
+
+export const useFont = () => {
+  const context = useContext(FontContext)
+  if (!context) {
+    throw new Error('useFont must be used within a FontProvider')
+  }
+  return context
+}
