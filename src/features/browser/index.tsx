@@ -52,9 +52,13 @@ function createTabId() {
 
 type BrowserWorkspaceProps = {
   visible: boolean
+  embedded?: boolean
 }
 
-export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
+export function BrowserWorkspace({
+  visible,
+  embedded = false,
+}: BrowserWorkspaceProps) {
   const { state: sidebarState } = useSidebar()
   const [tabs, setTabs] = useState<BrowserTab[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -238,9 +242,9 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
   }, [])
 
   useEffect(() => {
-    if (!isDesktop) return
+    if (!isDesktop || embedded) return
     void closeAllBrowserTabs().catch(() => undefined)
-  }, [])
+  }, [embedded])
 
   useEffect(() => {
     const reset = () => {
@@ -283,7 +287,7 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
   }, [sync])
 
   useEffect(() => {
-    if (!visible) return
+    if (!visible || embedded) return
 
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.ctrlKey || event.metaKey
@@ -323,7 +327,7 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
 
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [visible, addTab, closeTab, activeId, tabs])
+  }, [visible, embedded, addTab, closeTab, activeId, tabs])
 
   const isUrl = normalizeBrowserUrl(input) !== null
   const showNewTab = !activeTab?.url
@@ -331,11 +335,12 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
   return (
     <div
       className={cn(
-        'absolute inset-0 z-40 flex flex-col bg-background',
+        'absolute inset-0 flex flex-col bg-background',
+        embedded ? 'z-0' : 'z-40',
         !visible && 'hidden'
       )}
     >
-      <AuthenticatedHeader />
+      {!embedded && <AuthenticatedHeader />}
 
       <Main fixed fluid className='min-h-0 flex-1 overflow-hidden p-0'>
         <div className='flex h-full min-h-0 flex-col'>

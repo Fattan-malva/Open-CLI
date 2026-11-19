@@ -68,6 +68,16 @@ export const Route = createFileRoute('/_authenticated/help-center/')({
           actionLabel: 'Buka',
         },
         {
+          id: 'terminal-browser',
+          scope: 'Terminal',
+          title: 'Buka / tutup browser',
+          description:
+            'Menampilkan atau menyembunyikan panel browser di samping terminal.',
+          keys: ['Ctrl', 'Shift', 'B'],
+          action: () => void navigate({ to: '/terminal' }),
+          actionLabel: 'Buka',
+        },
+        {
           id: 'terminal-close',
           scope: 'Terminal',
           title: 'Tutup terminal aktif',

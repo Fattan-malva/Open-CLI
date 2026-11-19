@@ -1,5 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, FolderOpen, Plus, Terminal, Trash2, X } from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react'
+import {
+  Bot,
+  FolderOpen,
+  Globe,
+  GripVertical,
+  Plus,
+  Terminal,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
 import { CmdIcon, PowerShellIcon } from '@/components/shell-icons'
@@ -23,6 +39,12 @@ import {
   SelectSeparator,
   SelectTrigger,
 } from '@/components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { isDesktop } from '@/lib/platform'
 import { ptyIsBusy, ptyKill } from '@/lib/pty'
@@ -33,6 +55,7 @@ import {
 } from '@/lib/agent-cli-store'
 import { builtInAgents, type AgentCliItem } from '@/features/agent-cli/data/agents'
 import { ShortcutKeys } from '@/features/agent-cli/components/shortcut-keys'
+import { BrowserWorkspace } from '@/features/browser'
 import { ProjectPickerDialog } from './components/project-picker-dialog'
 import { TerminalPane } from './components/terminal-pane'
 import { useTerminalStore } from './store'
@@ -81,6 +104,12 @@ const terminalShortcuts = [
     icon: Plus,
   },
   {
+    keys: ['Ctrl', 'Shift', 'B'],
+    label: 'Buka / tutup browser',
+    description: 'Menampilkan panel browser di samping terminal.',
+    icon: Globe,
+  },
+  {
     keys: ['Ctrl', 'W'],
     label: 'Tutup satu',
     description: 'Menutup satu terminal dari bawah.',
@@ -96,6 +125,30 @@ const terminalShortcuts = [
 
 const GAP = 2
 const CLOSE_STEP_MS = 70
+const TERMINAL_BROWSER_SPLIT_KEY = 'opencli.terminal.browser.split.v1'
+const MIN_TERMINAL_ROW_HEIGHT = 180
+
+function clampBrowserSplit(value: number) {
+  if (!Number.isFinite(value)) return 0.5
+  return Math.min(0.75, Math.max(0.25, value))
+}
+
+function readBrowserSplitRatio() {
+  try {
+    const raw = localStorage.getItem(TERMINAL_BROWSER_SPLIT_KEY)
+    return raw ? clampBrowserSplit(Number(raw)) : 0.5
+  } catch {
+    return 0.5
+  }
+}
+
+function writeBrowserSplitRatio(value: number) {
+  try {
+    localStorage.setItem(TERMINAL_BROWSER_SPLIT_KEY, String(value))
+  } catch {
+    return
+  }
+}
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
@@ -130,9 +183,9 @@ type Drag = {
   size: number
 }
 
-function layoutFor(count: number, compact: boolean): Layout {
+function layoutFor(count: number, compact: boolean, maxCols = 4): Layout {
   if (compact) return { cols: 1, rows: count, lastCount: 1 }
-  const cols = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(count))))
+  const cols = Math.min(maxCols, Math.max(1, Math.ceil(Math.sqrt(count))))
   const rows = Math.ceil(count / cols)
   return { cols, rows, lastCount: count - cols * (rows - 1) }
 }
@@ -189,12 +242,35 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     makeWeights('1:1:1', { cols: 1, rows: 1, lastCount: 1 })
   )
   const [drag, setDrag] = useState<Drag | null>(null)
+  const [browserOpen, setBrowserOpen] = useState(false)
+  const [browserSplit, setBrowserSplit] = useState(readBrowserSplitRatio)
+  const [browserDrag, setBrowserDrag] = useState<{
+    start: number
+    startRatio: number
+    size: number
+    axis: 'x' | 'y'
+  } | null>(null)
+  const [browserStacked, setBrowserStacked] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia('(max-width: 900px)').matches
+  )
+  const [browserCompact, setBrowserCompact] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
+  const browserSplitRef = useRef<HTMLDivElement>(null)
+  const browserTerminalPaneRef = useRef<HTMLDivElement>(null)
   const animationTimer = useRef<number | null>(null)
+  const browserAxis = browserStacked ? 'y' : 'x'
 
+  const terminalCompact = browserOpen ? browserCompact : compact
   const layout = useMemo(
-    () => layoutFor(Math.max(1, tabs.length), compact),
-    [compact, tabs.length]
+    () =>
+      layoutFor(
+        Math.max(1, tabs.length),
+        terminalCompact,
+        browserOpen ? 2 : 4
+      ),
+    [browserOpen, terminalCompact, tabs.length]
   )
   const weightKey = `${layout.cols}:${layout.rows}:${layout.lastCount}`
   const colWeights =
@@ -227,6 +303,65 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     query.addEventListener('change', update)
     return () => query.removeEventListener('change', update)
   }, [])
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 900px)')
+    const update = () => setBrowserStacked(query.matches)
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    if (!browserOpen) return
+
+    const element = browserTerminalPaneRef.current
+    if (!element) return
+
+    const update = (width: number) => setBrowserCompact(width < 560)
+    update(element.clientWidth)
+
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (typeof width === 'number') update(width)
+    })
+    observer.observe(element)
+
+    return () => observer.disconnect()
+  }, [browserOpen])
+
+  useEffect(() => {
+    if (!browserDrag) writeBrowserSplitRatio(browserSplit)
+  }, [browserSplit, browserDrag])
+
+  useEffect(() => {
+    if (!browserDrag) return
+
+    const previous = document.body.style.userSelect
+    document.body.style.userSelect = 'none'
+
+    const onMove = (event: PointerEvent) => {
+      const current = browserAxis === 'x' ? event.clientX : event.clientY
+      setBrowserSplit(
+        clampBrowserSplit(
+          browserDrag.startRatio +
+            (current - browserDrag.start) / browserDrag.size
+        )
+      )
+    }
+    const onUp = () => setBrowserDrag(null)
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+
+    return () => {
+      document.body.style.userSelect = previous
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [browserDrag, browserAxis])
 
   useEffect(() => () => {
     if (animationTimer.current !== null) window.clearTimeout(animationTimer.current)
@@ -430,6 +565,18 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
       }
       if (
         event.ctrlKey &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === 'b'
+      ) {
+        if (!visible) return
+        event.preventDefault()
+        event.stopPropagation()
+        setBrowserOpen((open) => !open)
+        return
+      }
+      if (
+        event.ctrlKey &&
         !event.shiftKey &&
         !event.altKey &&
         event.key.toLowerCase() === 'w'
@@ -460,7 +607,14 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [activeId, addLauncher, closeAllByShortcut, closeOneByShortcut, setActive])
+  }, [
+    activeId,
+    addLauncher,
+    closeAllByShortcut,
+    closeOneByShortcut,
+    setActive,
+    visible,
+  ])
 
   useEffect(() => {
     if (!drag) return
@@ -514,6 +668,27 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     })
   }
 
+  const startBrowserDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const container = browserSplitRef.current
+    if (!container) return
+    event.preventDefault()
+
+    const rect = container.getBoundingClientRect()
+    const size = browserAxis === 'x' ? rect.width : rect.height
+    if (size <= 0) return
+
+    setBrowserDrag({
+      start: browserAxis === 'x' ? event.clientX : event.clientY,
+      startRatio: browserSplit,
+      size,
+      axis: browserAxis,
+    })
+  }
+
+  const browserPaneStyle = (side: 'terminal' | 'browser'): CSSProperties => ({
+    flexBasis: `${(side === 'terminal' ? browserSplit : 1 - browserSplit) * 100}%`,
+  })
+
   const rectFor = (index: number) => {
     const lastRow = layout.lastCount < layout.cols && index >= fullRows * layout.cols
     const rowIndex = lastRow
@@ -536,6 +711,174 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     selectedAgent || !launcher.startsWith('agent:') ? launcher : shell
   const selectedShell = shells.find((item) => item.value === launcherValue) ?? shells[0]
   const showTerminal = visible
+
+  const terminalArea = (
+    <>
+      {tabs.length === 0 ? (
+        <div className='flex h-full items-center justify-center p-4'>
+          <div className='w-full max-w-3xl rounded-xl border bg-card/60 p-6 shadow-sm'>
+            <div className='mx-auto flex size-10 items-center justify-center rounded-lg bg-secondary text-secondary-foreground'>
+              <Terminal className='size-5' />
+            </div>
+            <div className='mt-4 text-center'>
+              <h2 className='text-base font-semibold'>Belum ada terminal</h2>
+              <p className='mx-auto mt-1 max-w-md text-xs text-muted-foreground'>
+                Buat terminal pertama untuk menjalankan perintah. Panel baru
+                otomatis masuk ke grid dan bisa diatur ukurannya.
+              </p>
+              <p className='mx-auto mt-2 flex max-w-md flex-wrap items-center justify-center gap-1 text-[11px] text-muted-foreground'>
+                <span>Tekan</span>
+                <kbd className='rounded border bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
+                  Ctrl
+                </kbd>
+                <span>+</span>
+                <kbd className='rounded border bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
+                  Shift
+                </kbd>
+                <span>+</span>
+                <kbd className='rounded border bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
+                  B
+                </kbd>
+                <span>untuk membuka atau menutup browser.</span>
+              </p>
+              {!isDesktop && (
+                <p className='mt-2 text-[11px] text-amber-500'>
+                  Mode browser: terminal real hanya tersedia di aplikasi desktop.
+                </p>
+              )}
+              <Button onClick={addLauncher} className='mt-4 gap-1'>
+                <Plus className='size-4' />
+                Buat terminal pertama
+              </Button>
+            </div>
+            <div className='mt-6 grid gap-2 text-left sm:grid-cols-3'>
+              {terminalShortcuts.map((shortcut) => {
+                const Icon = shortcut.icon
+                return (
+                  <div
+                    key={shortcut.label}
+                    className='rounded-lg border bg-secondary/60 p-3'
+                  >
+                    <div className='flex items-center gap-2'>
+                      <span className='flex size-7 items-center justify-center rounded-md bg-background/70'>
+                        <Icon className='size-3.5' />
+                      </span>
+                      <span className='text-[11px] font-medium'>
+                        {shortcut.label}
+                      </span>
+                    </div>
+                    <div className='mt-2 flex flex-wrap gap-1'>
+                      {shortcut.keys.map((key) => (
+                        <kbd
+                          key={key}
+                          className='rounded border bg-background/70 px-1.5 py-0.5 text-[10px] text-muted-foreground'
+                        >
+                          {key}
+                        </kbd>
+                      ))}
+                    </div>
+                    <p className='mt-2 text-[10px] leading-relaxed text-muted-foreground'>
+                      {shortcut.description}
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div
+          ref={gridRef}
+          className='relative h-full w-full'
+          style={
+            browserOpen
+              ? {
+                  minHeight: `max(100%, ${layout.rows * MIN_TERMINAL_ROW_HEIGHT}px)`,
+                }
+              : undefined
+          }
+        >
+          {tabs.map((tab, index) => {
+            const rect = rectFor(index)
+            return (
+              <div
+                key={tab.id}
+                className={cn(
+                  'absolute min-h-0 min-w-0',
+                  animatedId === tab.id && 'animate-terminal-split'
+                )}
+                style={{
+                  left: `calc(${rect.left}% + ${GAP / 2}px)`,
+                  top: `calc(${rect.top}% + ${GAP / 2}px)`,
+                  width: `calc(${rect.right - rect.left}% - ${GAP}px)`,
+                  height: `calc(${rect.bottom - rect.top}% - ${GAP}px)`,
+                }}
+              >
+                <TerminalPane
+                  tab={tab}
+                  active={activeId === tab.id}
+                  visible={showTerminal}
+                  onActivate={() => setActive(tab.id)}
+                  onRequestClose={requestClose}
+                  onRename={rename}
+                />
+              </div>
+            )
+          })}
+
+          {Array.from({ length: fullRows }, (_, rowIndex) =>
+            colPositions.slice(1, -1).map((position, index) => (
+              <div
+                key={`col-${rowIndex}-${index}`}
+                role='separator'
+                aria-orientation='vertical'
+                onPointerDown={(event) => startDrag('cols', index, event)}
+                className='absolute z-20 -translate-x-1/2 cursor-col-resize px-1'
+                style={{
+                  left: `${position}%`,
+                  top: `${rowPositions[rowIndex]}%`,
+                  height: `${rowPositions[rowIndex + 1] - rowPositions[rowIndex]}%`,
+                }}
+              >
+                <div className='h-full w-px bg-transparent transition-colors hover:bg-neutral-600' />
+              </div>
+            ))
+          )}
+
+          {layout.lastCount < layout.cols &&
+            lastPositions.slice(1, -1).map((position, index) => (
+              <div
+                key={`last-${index}`}
+                role='separator'
+                aria-orientation='vertical'
+                onPointerDown={(event) => startDrag('last', index, event)}
+                className='absolute z-20 -translate-x-1/2 cursor-col-resize px-1'
+                style={{
+                  left: `${position}%`,
+                  top: `${rowPositions[layout.rows - 1]}%`,
+                  height: `${rowPositions[layout.rows] - rowPositions[layout.rows - 1]}%`,
+                }}
+              >
+                <div className='h-full w-px bg-transparent transition-colors hover:bg-neutral-600' />
+              </div>
+            ))}
+
+          {rowPositions.slice(1, -1).map((position, index) => (
+            <div
+              key={`row-${index}`}
+              role='separator'
+              aria-orientation='horizontal'
+              onPointerDown={(event) => startDrag('rows', index, event)}
+              className='absolute inset-x-0 z-20 -translate-y-1/2 cursor-row-resize py-1'
+              style={{ top: `${position}%` }}
+            >
+              <div className='h-px w-full bg-transparent transition-colors hover:bg-neutral-600' />
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  )
 
   return (
     <div
@@ -628,156 +971,107 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
               </Select>
             </div>
 
-            <Button
-              size='sm'
-              onClick={addLauncher}
-              className='h-7 gap-1 px-2 text-[11px]'
-            >
-              <Plus className='size-3.5' />
-              Terminal baru
-            </Button>
-          </div>
-
-          <div className='relative min-h-0 flex-1 px-1.5 pb-1.5'>
-            {tabs.length === 0 ? (
-              <div className='flex h-full items-center justify-center p-4'>
-                <div className='w-full max-w-3xl rounded-xl border bg-card/60 p-6 shadow-sm'>
-                  <div className='mx-auto flex size-10 items-center justify-center rounded-lg bg-secondary text-secondary-foreground'>
-                    <Terminal className='size-5' />
-                  </div>
-                  <div className='mt-4 text-center'>
-                    <h2 className='text-base font-semibold'>Belum ada terminal</h2>
-                    <p className='mx-auto mt-1 max-w-md text-xs text-muted-foreground'>
-                      Buat terminal pertama untuk menjalankan perintah. Panel baru
-                      otomatis masuk ke grid dan bisa diatur ukurannya.
-                    </p>
-                    {!isDesktop && (
-                      <p className='mt-2 text-[11px] text-amber-500'>
-                        Mode browser: terminal real hanya tersedia di aplikasi desktop.
-                      </p>
-                    )}
-                    <Button onClick={addLauncher} className='mt-4 gap-1'>
-                      <Plus className='size-4' />
-                      Buat terminal pertama
+            <div className='flex shrink-0 items-center gap-2'>
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant='secondary'
+                      size='sm'
+                      aria-pressed={browserOpen}
+                      onClick={() => setBrowserOpen((open) => !open)}
+                      className='h-7 gap-1 px-2 text-[11px]'
+                    >
+                      <Globe className='size-3.5' />
+                      {browserOpen ? 'Tutup browser' : 'Buka browser'}
                     </Button>
-                  </div>
-                  <div className='mt-6 grid gap-2 text-left sm:grid-cols-3'>
-                    {terminalShortcuts.map((shortcut) => {
-                      const Icon = shortcut.icon
-                      return (
-                        <div
-                          key={shortcut.label}
-                          className='rounded-lg border bg-secondary/60 p-3'
-                        >
-                          <div className='flex items-center gap-2'>
-                            <span className='flex size-7 items-center justify-center rounded-md bg-background/70'>
-                              <Icon className='size-3.5' />
-                            </span>
-                            <span className='text-[11px] font-medium'>
-                              {shortcut.label}
-                            </span>
-                          </div>
-                          <div className='mt-2 flex flex-wrap gap-1'>
-                            {shortcut.keys.map((key) => (
-                              <kbd
-                                key={key}
-                                className='rounded border bg-background/70 px-1.5 py-0.5 text-[10px] text-muted-foreground'
-                              >
-                                {key}
-                              </kbd>
-                            ))}
-                          </div>
-                          <p className='mt-2 text-[10px] leading-relaxed text-muted-foreground'>
-                            {shortcut.description}
-                          </p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div ref={gridRef} className='relative h-full w-full'>
-                {tabs.map((tab, index) => {
-                  const rect = rectFor(index)
-                  return (
-                    <div
-                      key={tab.id}
-                      className={cn(
-                        'absolute min-h-0 min-w-0',
-                        animatedId === tab.id && 'animate-terminal-split'
-                      )}
-                      style={{
-                        left: `calc(${rect.left}% + ${GAP / 2}px)`,
-                        top: `calc(${rect.top}% + ${GAP / 2}px)`,
-                        width: `calc(${rect.right - rect.left}% - ${GAP}px)`,
-                        height: `calc(${rect.bottom - rect.top}% - ${GAP}px)`,
-                      }}
-                    >
-                      <TerminalPane
-                        tab={tab}
-                        active={activeId === tab.id}
-                        visible={showTerminal}
-                        onActivate={() => setActive(tab.id)}
-                        onRequestClose={requestClose}
-                        onRename={rename}
-                      />
-                    </div>
-                  )
-                })}
-
-                {Array.from({ length: fullRows }, (_, rowIndex) =>
-                  colPositions.slice(1, -1).map((position, index) => (
-                    <div
-                      key={`col-${rowIndex}-${index}`}
-                      role='separator'
-                      aria-orientation='vertical'
-                      onPointerDown={(event) => startDrag('cols', index, event)}
-                      className='absolute z-20 -translate-x-1/2 cursor-col-resize px-1'
-                      style={{
-                        left: `${position}%`,
-                        top: `${rowPositions[rowIndex]}%`,
-                        height: `${rowPositions[rowIndex + 1] - rowPositions[rowIndex]}%`,
-                      }}
-                    >
-                      <div className='h-full w-px bg-transparent transition-colors hover:bg-neutral-600' />
-                    </div>
-                  ))
-                )}
-
-                {layout.lastCount < layout.cols &&
-                  lastPositions.slice(1, -1).map((position, index) => (
-                    <div
-                      key={`last-${index}`}
-                      role='separator'
-                      aria-orientation='vertical'
-                      onPointerDown={(event) => startDrag('last', index, event)}
-                      className='absolute z-20 -translate-x-1/2 cursor-col-resize px-1'
-                      style={{
-                        left: `${position}%`,
-                        top: `${rowPositions[layout.rows - 1]}%`,
-                        height: `${rowPositions[layout.rows] - rowPositions[layout.rows - 1]}%`,
-                      }}
-                    >
-                      <div className='h-full w-px bg-transparent transition-colors hover:bg-neutral-600' />
-                    </div>
-                  ))}
-
-                {rowPositions.slice(1, -1).map((position, index) => (
-                  <div
-                    key={`row-${index}`}
-                    role='separator'
-                    aria-orientation='horizontal'
-                    onPointerDown={(event) => startDrag('rows', index, event)}
-                    className='absolute inset-x-0 z-20 -translate-y-1/2 cursor-row-resize py-1'
-                    style={{ top: `${position}%` }}
-                  >
-                    <div className='h-px w-full bg-transparent transition-colors hover:bg-neutral-600' />
-                  </div>
-                ))}
-              </div>
-            )}
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {browserOpen ? 'Tutup browser' : 'Buka browser'} · Ctrl + Shift + B
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <Button
+                size='sm'
+                onClick={addLauncher}
+                className='h-7 gap-1 px-2 text-[11px]'
+              >
+                <Plus className='size-3.5' />
+                Terminal baru
+              </Button>
+            </div>
           </div>
+
+          {browserOpen ? (
+            <div
+              ref={browserSplitRef}
+              data-browser-split=''
+              className={cn(
+                'relative min-h-0 flex-1 p-1.5',
+                browserStacked ? 'flex flex-col' : 'flex flex-row'
+              )}
+            >
+              <div
+                ref={browserTerminalPaneRef}
+                data-panel='terminal'
+                className={cn(
+                  'flex min-h-0 min-w-0 flex-col overflow-y-auto rounded-lg border border-border bg-background sidebar-scroll overscroll-contain',
+                  browserStacked ? 'pb-1.5' : 'pr-1.5'
+                )}
+                style={browserPaneStyle('terminal')}
+              >
+                <div className='min-h-0 flex-1 p-1.5'>{terminalArea}</div>
+              </div>
+
+              <div
+                role='separator'
+                aria-orientation={browserStacked ? 'horizontal' : 'vertical'}
+                aria-label='Ubah ukuran panel'
+                onPointerDown={startBrowserDrag}
+                className={cn(
+                  'group relative z-20 flex shrink-0 touch-none items-center justify-center',
+                  browserStacked
+                    ? 'h-2 w-full cursor-row-resize'
+                    : 'h-full w-2 cursor-col-resize'
+                )}
+              >
+                <div
+                  className={cn(
+                    'bg-border transition-colors group-hover:bg-primary/50',
+                    browserStacked ? 'h-px w-full' : 'h-full w-px'
+                  )}
+                />
+                <span
+                  className={cn(
+                    'absolute flex items-center justify-center rounded-full border bg-background',
+                    browserStacked ? 'h-4 w-8' : 'h-8 w-4'
+                  )}
+                >
+                  <GripVertical
+                    className={cn(
+                      'size-3 text-muted-foreground',
+                      browserStacked && 'rotate-90'
+                    )}
+                  />
+                </span>
+              </div>
+
+              <div
+                data-panel='browser'
+                className={cn(
+                  'relative min-h-0 min-w-0 overflow-hidden rounded-lg border border-border bg-background',
+                  browserStacked ? 'mt-1.5' : 'ml-1.5'
+                )}
+                style={browserPaneStyle('browser')}
+              >
+                <BrowserWorkspace visible={showTerminal && browserOpen} embedded />
+              </div>
+            </div>
+          ) : (
+            <div className='relative min-h-0 flex-1 px-1.5 pb-1.5'>
+              {terminalArea}
+            </div>
+          )}
         </div>
       </Main>
 
