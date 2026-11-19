@@ -1,5 +1,13 @@
 import { Outlet } from '@tanstack/react-router'
-import { Monitor, Bell, Palette, Wrench, UserCog } from 'lucide-react'
+import {
+  Monitor,
+  Bell,
+  Palette,
+  ShieldCheck,
+  Trash2,
+  Wrench,
+  UserCog,
+} from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
@@ -30,6 +38,16 @@ const sidebarNavItems = [
     title: 'Display',
     href: '/settings/display',
     icon: <Monitor size={18} />,
+  },
+  {
+    title: 'Privacy',
+    href: '/settings/privacy',
+    icon: <ShieldCheck size={18} />,
+  },
+  {
+    title: 'Uninstall',
+    href: '/settings/uninstall',
+    icon: <Trash2 size={18} />,
   },
 ]
 

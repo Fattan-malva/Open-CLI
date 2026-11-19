@@ -50,3 +50,10 @@ Desktop.ini
 
 # Vite
 .vite
+
+/release/
+/.config/
+.opencli/
+**/EBWebView/
+**/cli-agent.json
+**/browser-privacy.json

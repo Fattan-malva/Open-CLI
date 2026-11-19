@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, WindowEvent,
@@ -55,6 +55,18 @@ struct PtyEvent {
 const AGENT_CLI_FILE: &str = "cli-agent.json";
 const EMPTY_AGENT_CLI_JSON: &str =
     "{\"customAgents\":[],\"activeIds\":[],\"projectPath\":null}";
+const BROWSER_PRIVACY_FILE: &str = "browser-privacy.json";
+const EMPTY_BROWSER_PRIVACY_JSON: &str = "{\"sessionOnly\":false}";
+const LEGACY_APP_DIR_NAME: &str = "com.opencli.app";
+const LEGACY_RUNTIME_DIR_NAME: &str = "OpenCLI";
+const DEV_APP_DIR_NAME: &str = "opencli-dev";
+const UNINSTALL_CONFIRMATION: &str = "UNINSTALL";
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserPrivacy {
+    session_only: bool,
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -446,6 +458,84 @@ struct BrowserTitleEvent {
     title: String,
 }
 
+fn browser_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let root = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?;
+    Ok(root.join("EBWebView"))
+}
+
+fn browser_privacy_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let root = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    Ok(root.join("data").join(BROWSER_PRIVACY_FILE))
+}
+
+fn default_browser_privacy() -> BrowserPrivacy {
+    serde_json::from_str::<BrowserPrivacy>(EMPTY_BROWSER_PRIVACY_JSON)
+        .unwrap_or(BrowserPrivacy { session_only: false })
+}
+
+fn read_browser_privacy(app: &AppHandle) -> BrowserPrivacy {
+    let path = match browser_privacy_path(app) {
+        Ok(path) => path,
+        Err(_) => return default_browser_privacy(),
+    };
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(_) => return default_browser_privacy(),
+    };
+    match serde_json::from_str::<BrowserPrivacy>(&contents) {
+        Ok(privacy) => privacy,
+        Err(_) => default_browser_privacy(),
+    }
+}
+
+fn write_browser_privacy(app: &AppHandle, privacy: &BrowserPrivacy) -> Result<(), String> {
+    let path = browser_privacy_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let contents = serde_json::to_string(privacy).map_err(|error| error.to_string())?;
+    fs::write(path, contents).map_err(|error| error.to_string())
+}
+
+fn clear_browsing_data(app: &AppHandle) -> Result<(), String> {
+    let webviews = app.webviews();
+    if webviews.is_empty() {
+        return Err("Webview tidak ditemukan.".to_string());
+    }
+
+    let mut failure = None;
+    for webview in webviews.values() {
+        if let Err(error) = webview.clear_all_browsing_data() {
+            failure = Some(error.to_string());
+        }
+    }
+
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+fn close_browser_webviews(app: &AppHandle) -> Result<(), String> {
+    let labels: Vec<String> = app
+        .webviews()
+        .keys()
+        .cloned()
+        .filter(|label| label.starts_with("browser-tab-") || label == BROWSER_WEBVIEW_LABEL)
+        .collect();
+
+    for label in labels {
+        if let Some(webview) = app.get_webview(&label) {
+            webview.close().map_err(|error| error.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
 fn browser_bounds(x: f64, y: f64, width: f64, height: f64) -> Rect {
     Rect {
         position: LogicalPosition::new(x, y).into(),
@@ -628,26 +718,9 @@ async fn browser_tab_close(app: AppHandle, label: String) -> Result<(), String> 
 
 #[tauri::command]
 async fn browser_tabs_close_all(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let webviews = app.webviews();
-        let labels: Vec<String> = webviews
-            .keys()
-            .cloned()
-            .filter(|label| {
-                label.starts_with("browser-tab-") || label == BROWSER_WEBVIEW_LABEL
-            })
-            .collect();
-
-        for label in labels {
-            if let Some(webview) = app.get_webview(&label) {
-                webview.close().map_err(|error| error.to_string())?;
-            }
-        }
-
-        Ok(())
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || close_browser_webviews(&app))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 fn agent_cli_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -655,8 +728,69 @@ fn agent_cli_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(root.join("data").join(AGENT_CLI_FILE))
 }
 
+fn legacy_agent_cli_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let root = app.path().config_dir().map_err(|error| error.to_string())?;
+    Ok(root
+        .join(LEGACY_APP_DIR_NAME)
+        .join("data")
+        .join(AGENT_CLI_FILE))
+}
+
+fn migrate_legacy_agent_cli_file(app: &AppHandle, target: &Path) {
+    if cfg!(debug_assertions) || target.exists() {
+        return;
+    }
+
+    let legacy = match legacy_agent_cli_path(app) {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    if !legacy.exists() {
+        return;
+    }
+
+    if let Some(parent) = target.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    if let Ok(contents) = fs::read_to_string(&legacy) {
+        if serde_json::from_str::<JsonValue>(&contents).is_ok() {
+            let _ = fs::write(target, contents);
+        }
+    }
+}
+
+fn remove_app_data_dir(path: &Path) -> Result<(), String> {
+    let expected = std::ffi::OsStr::new("opencli");
+    let dev = std::ffi::OsStr::new(DEV_APP_DIR_NAME);
+    let legacy = std::ffi::OsStr::new(LEGACY_APP_DIR_NAME);
+    let runtime = std::ffi::OsStr::new(LEGACY_RUNTIME_DIR_NAME);
+    let name = path.file_name().unwrap_or_default();
+    if name != expected && name != dev && name != legacy && name != runtime {
+        return Err("Path data aplikasi tidak valid.".to_string());
+    }
+    if !path.exists() {
+        return Ok(());
+    }
+    fs::remove_dir_all(path).map_err(|error| error.to_string())
+}
+
+fn uninstaller_path() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let parent = exe
+        .parent()
+        .ok_or_else(|| "Folder aplikasi tidak ditemukan.".to_string())?;
+    let path = parent.join("unins000.exe");
+    if !path.exists() {
+        return Err("Uninstaller tidak ditemukan pada folder aplikasi.".to_string());
+    }
+    Ok(path)
+}
+
 fn ensure_agent_cli_file(app: &AppHandle) -> Result<PathBuf, String> {
     let path = agent_cli_path(app)?;
+    migrate_legacy_agent_cli_file(app, &path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -664,6 +798,77 @@ fn ensure_agent_cli_file(app: &AppHandle) -> Result<PathBuf, String> {
         fs::write(&path, EMPTY_AGENT_CLI_JSON).map_err(|error| error.to_string())?;
     }
     Ok(path)
+}
+
+#[tauri::command]
+fn app_data_path(app: AppHandle) -> Result<String, String> {
+    let root = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    Ok(root.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn browser_data_path(app: AppHandle) -> Result<String, String> {
+    let path = browser_data_dir(&app)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn browser_clear_data(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        close_browser_webviews(&app)?;
+        clear_browsing_data(&app)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn browser_session_only_get(app: AppHandle) -> Result<bool, String> {
+    Ok(read_browser_privacy(&app).session_only)
+}
+
+#[tauri::command]
+fn browser_session_only_set(app: AppHandle, enabled: bool) -> Result<(), String> {
+    write_browser_privacy(&app, &BrowserPrivacy { session_only: enabled })?;
+    if enabled {
+        clear_browsing_data(&app)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn app_uninstall(app: AppHandle, confirmation: String) -> Result<(), String> {
+    if confirmation != UNINSTALL_CONFIRMATION {
+        return Err(format!(
+            "Ketik {} untuk melanjutkan uninstall.",
+            UNINSTALL_CONFIRMATION
+        ));
+    }
+
+    let uninstaller = uninstaller_path()?;
+    let data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    remove_app_data_dir(&data_dir)?;
+
+    let legacy_config = app
+        .path()
+        .config_dir()
+        .map_err(|error| error.to_string())?
+        .join(LEGACY_APP_DIR_NAME);
+    remove_app_data_dir(&legacy_config)?;
+
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        let legacy_local = PathBuf::from(&local).join(LEGACY_APP_DIR_NAME);
+        remove_app_data_dir(&legacy_local)?;
+
+        let legacy_runtime = PathBuf::from(&local).join(LEGACY_RUNTIME_DIR_NAME);
+        remove_app_data_dir(&legacy_runtime)?;
+    }
+
+    let _child = Command::new(&uninstaller)
+        .arg("/S")
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    std::process::exit(0);
 }
 
 #[tauri::command]
@@ -745,7 +950,32 @@ fn fs_list_folders(path: String, query: Option<String>) -> Result<Vec<FsEntry>, 
     Ok(entries.into_iter().take(300).collect())
 }
 
+fn dev_data_root() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()?;
+    if home.trim().is_empty() {
+        return None;
+    }
+
+    Some(
+        PathBuf::from(home)
+            .join(".config")
+            .join(DEV_APP_DIR_NAME),
+    )
+}
+
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    if let Some(root) = dev_data_root() {
+        context.config_mut().app.app_directories_override =
+            Some(tauri::utils::config::AppDirectoriesOverride::Root(root));
+    }
+
     tauri::Builder::default()
         .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
@@ -764,6 +994,12 @@ pub fn run() {
             browser_tabs_close_all,
             agent_cli_read,
             agent_cli_write,
+            app_data_path,
+            browser_data_path,
+            browser_clear_data,
+            browser_session_only_get,
+            browser_session_only_set,
+            app_uninstall,
             fs_list_drives,
             fs_list_folders
         ])
@@ -771,14 +1007,23 @@ pub fn run() {
             if let Err(error) = ensure_agent_cli_file(app.handle()) {
                 eprintln!("Gagal menyiapkan data/cli-agent.json: {}", error);
             }
+            if read_browser_privacy(app.handle()).session_only {
+                if let Err(error) = clear_browsing_data(app.handle()) {
+                    eprintln!("Gagal membersihkan data browser: {}", error);
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {
                 let state = window.state::<PtyState>();
                 kill_all(&state);
+
+                if read_browser_privacy(window.app_handle()).session_only {
+                    let _ = clear_browsing_data(window.app_handle());
+                }
             }
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }

@@ -1,14 +1,11 @@
-# Open-CLI
-
-A modern admin dashboard built with React 19, TypeScript, TanStack Router, and TailwindCSS v4. Features a Tauri desktop app with embedded terminal.
-
-![Open-CLI Dashboard](public/images/shadcn-admin.png)
+![Open-CLI Dashboard](src/assets/open-cli-banner.png)
 
 ## Features
 
 - **Authentication**: Email/password with Clerk integration (optional)
 - **Desktop App**: Tauri v2 with native terminal (PTY), embedded browser, window controls
-- **Dashboard**: Users, Tasks, Settings (Profile, Account, Appearance, Notifications, Display)
+- **Agent CLI**: Custom agents, unique `Alt + letter` shortcuts, project picker, unified launcher dropdown
+- **Dashboard**: Users, Tasks, Settings (Profile, Account, Appearance, Notifications, Display, Privacy, Uninstall)
 - **Global Search**: Command palette with keyboard shortcuts (⌘K / Ctrl+K)
 - **Theming**: Light/Dark/System with persistence
 - **Layout**: Configurable sidebar (inset/floating/sidebar), collapsible states
@@ -24,7 +21,7 @@ A modern admin dashboard built with React 19, TypeScript, TanStack Router, and T
 | Routing | TanStack Router (file-based) |
 | State | Zustand, TanStack Query |
 | Desktop | Tauri v2 (Rust) |
-| Build | Vite 6, TypeScript 6 |
+| Build | Vite 8, TypeScript 6 |
 | Testing | Vitest + Playwright (browser) |
 | Linting | ESLint 10, Prettier |
 
@@ -41,7 +38,7 @@ src/
 │   ├── auth/         # Sign-in, Sign-up, OTP, Forgot password
 │   ├── users/        # User management with table, dialogs
 │   ├── tasks/        # Task management with table, dialogs
-│   ├── settings/     # Profile, Account, Appearance, Notifications, Display
+│   ├── settings/     # Profile, Account, Appearance, Notifications, Display, Privacy, Uninstall
 │   ├── terminal/     # Multi-tab PTY terminal (desktop only)
 │   ├── chats/        # Chat interface
 │   └── errors/       # Error boundaries (401, 403, 404, 500, 503)
@@ -79,9 +76,30 @@ $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
 # Start Tauri dev (includes web dev server)
 pnpm run desktop:dev
 
-# Build desktop app
+# Build desktop app + installer NSIS
 pnpm run desktop:build
+
+# Build portable release ke release/OpenCLI
+pnpm run desktop:build:release
+
+# Clean build lalu build portable release
+pnpm run desktop:build:release:clean
+
+# Bersihkan artifact build saja
+pnpm run build:clean
 ```
+
+### Portable Release
+
+`pnpm run desktop:build:release` menghasilkan folder:
+
+```text
+release/OpenCLI/
+├── OpenCLI.exe
+└── README.txt
+```
+
+Folder `release/OpenCLI` bisa dipindah ke lokasi mana pun selama masih di Windows. Jalankan `OpenCLI.exe` langsung; tidak perlu instalasi. Data aplikasi tetap dibuat di `%USERPROFILE%\.config\opencli`, bukan di folder portable. Jika ingin menyertakan WebView2 bootstrapper untuk Windows 10, letakkan `MicrosoftEdgeWebview2Setup.exe` di `scripts/assets/` sebelum build; file itu akan ikut disalin.
 
 ### Testing
 
@@ -96,28 +114,35 @@ pnpm run test:ui
 pnpm run test:coverage
 ```
 
-### Linting & Formatting
+### Linting & Type Check
 
 ```bash
-# Check formatting
-pnpm run format:check
-
-# Format code
-pnpm run format
-
 # Lint
 pnpm run lint
 
-# Type check
-pnpm run build  # includes tsc -b
+# Type check + Vite build
+pnpm run build
 ```
 
 ## Desktop Features (Tauri)
 
 - **Terminal**: Multi-tab PTY terminal with grid layout, drag-to-resize panes
-- **Embedded Browser**: Open URLs in native webview with custom bounds
-- **Window Controls**: Minimize, maximize, close with drag region
+- **Agent CLI**: Unified launcher dropdown, custom agents, project picker, `Alt + letter` shortcuts
+- **Embedded Browser**: Multi-tab native WebView2 workspace with local profile
+- **Window Controls**: Minimize, maximize, close with manual drag
 - **System Theme**: Syncs with OS dark/light mode
+- **Privacy**: Clear browser data, session-only browser mode, uninstall with confirmation
+
+## Data & Privacy
+
+Semua data desktop disimpan lokal per akun Windows:
+
+| Build | Root data |
+|-------|-----------|
+| Production | `%USERPROFILE%\.config\opencli` |
+| Development (`pnpm run desktop:dev`) | `%USERPROFILE%\.config\opencli-dev` |
+
+Profil browser WebView2 ada di `<root>\EBWebView`. Data tersebut berisi cookie, local storage, dan sesi website. Tidak ada data yang ikut ke repo dan tidak ada sinkronisasi otomatis antar laptop. Gunakan `Settings → Privacy` untuk menghapus data browser atau mengaktifkan sesi browser privat. `Settings → Uninstall` menghapus seluruh root data produksi setelah konfirmasi `UNINSTALL`.
 
 ## Configuration
 
@@ -149,15 +174,15 @@ Without the key, the Clerk routes show setup instructions. The main app uses a s
 |---------|-------------|
 | `pnpm run dev` | Start web dev server |
 | `pnpm run desktop:dev` | Start Tauri dev |
-| `pnpm run desktop:build` | Build desktop app |
+| `pnpm run desktop:build` | Build desktop app + NSIS installer |
+| `pnpm run desktop:build:release` | Build portable folder `release/OpenCLI` |
+| `pnpm run desktop:build:release:clean` | Clean build, lalu build portable `release/OpenCLI` |
+| `pnpm run build:clean` | Hapus artifact build |
 | `pnpm run build` | Type check + Vite build |
 | `pnpm run lint` | ESLint |
-| `pnpm run format` | Prettier write |
-| `pnpm run format:check` | Prettier check |
 | `pnpm run test` | Vitest headless |
 | `pnpm run test:ui` | Vitest UI |
 | `pnpm run test:coverage` | Coverage report |
-| `pnpm run knip` | Find unused files/exports |
 
 ## License
 

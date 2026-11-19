@@ -47,7 +47,7 @@ export const Route = createFileRoute('/_authenticated/about/')({
             <Card className='gap-1 p-4 text-center shadow-sm'>
               <p className='text-sm font-semibold'>Lokal</p>
               <p className='text-xs leading-relaxed text-muted-foreground'>
-                Workspace dan pengaturan tersimpan di perangkat.
+                Pengaturan dan profil browser tersimpan di akun Windows ini.
               </p>
             </Card>
             <Card className='gap-1 p-4 text-center shadow-sm'>
@@ -57,6 +57,17 @@ export const Route = createFileRoute('/_authenticated/about/')({
               </p>
             </Card>
           </div>
+
+          <Card className='mx-auto w-full max-w-2xl gap-2 p-5 text-left shadow-sm'>
+            <p className='text-sm font-semibold'>Privasi data</p>
+            <p className='text-xs leading-relaxed text-muted-foreground'>
+              Data agent, cache, dan profil browser WebView2 tersimpan lokal di
+              `%USERPROFILE%\.config\opencli` untuk produksi, atau
+              `opencli-dev` untuk development. Data tidak ikut repo dan tidak
+              dibagikan otomatis ke laptop lain. Settings → Privacy menyediakan
+              hapus data browser dan sesi browser privat.
+            </p>
+          </Card>
 
           <p className='mt-auto pt-6 text-center text-xs text-muted-foreground'>
             © {new Date().getFullYear()} Open CLI. Dibuat oleh Fattan-Malva ❤️

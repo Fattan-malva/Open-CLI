@@ -31,6 +31,8 @@ import { Route as AuthenticatedAgentFlowIndexRouteImport } from './routes/_authe
 import { Route as AuthenticatedAgentCliIndexRouteImport } from './routes/_authenticated/agent-cli/index'
 import { Route as AuthenticatedAgentChatIndexRouteImport } from './routes/_authenticated/agent-chat/index'
 import { Route as AuthenticatedAboutIndexRouteImport } from './routes/_authenticated/about/index'
+import { Route as AuthenticatedSettingsUninstallRouteImport } from './routes/_authenticated/settings/uninstall'
+import { Route as AuthenticatedSettingsPrivacyRouteImport } from './routes/_authenticated/settings/privacy'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
@@ -154,6 +156,18 @@ const AuthenticatedAboutIndexRoute = AuthenticatedAboutIndexRouteImport.update({
   path: '/about/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedSettingsUninstallRoute =
+  AuthenticatedSettingsUninstallRouteImport.update({
+    id: '/uninstall',
+    path: '/uninstall',
+    getParentRoute: () => AuthenticatedSettingsRouteRoute,
+  } as any)
+const AuthenticatedSettingsPrivacyRoute =
+  AuthenticatedSettingsPrivacyRouteImport.update({
+    id: '/privacy',
+    path: '/privacy',
+    getParentRoute: () => AuthenticatedSettingsRouteRoute,
+  } as any)
 const AuthenticatedSettingsNotificationsRoute =
   AuthenticatedSettingsNotificationsRouteImport.update({
     id: '/notifications',
@@ -202,6 +216,8 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
+  '/settings/privacy': typeof AuthenticatedSettingsPrivacyRoute
+  '/settings/uninstall': typeof AuthenticatedSettingsUninstallRoute
   '/about/': typeof AuthenticatedAboutIndexRoute
   '/agent-chat/': typeof AuthenticatedAgentChatIndexRoute
   '/agent-cli/': typeof AuthenticatedAgentCliIndexRoute
@@ -229,6 +245,8 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
+  '/settings/privacy': typeof AuthenticatedSettingsPrivacyRoute
+  '/settings/uninstall': typeof AuthenticatedSettingsUninstallRoute
   '/about': typeof AuthenticatedAboutIndexRoute
   '/agent-chat': typeof AuthenticatedAgentChatIndexRoute
   '/agent-cli': typeof AuthenticatedAgentCliIndexRoute
@@ -259,6 +277,8 @@ export interface FileRoutesById {
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/_authenticated/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
+  '/_authenticated/settings/privacy': typeof AuthenticatedSettingsPrivacyRoute
+  '/_authenticated/settings/uninstall': typeof AuthenticatedSettingsUninstallRoute
   '/_authenticated/about/': typeof AuthenticatedAboutIndexRoute
   '/_authenticated/agent-chat/': typeof AuthenticatedAgentChatIndexRoute
   '/_authenticated/agent-cli/': typeof AuthenticatedAgentCliIndexRoute
@@ -289,6 +309,8 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/display'
     | '/settings/notifications'
+    | '/settings/privacy'
+    | '/settings/uninstall'
     | '/about/'
     | '/agent-chat/'
     | '/agent-cli/'
@@ -316,6 +338,8 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/display'
     | '/settings/notifications'
+    | '/settings/privacy'
+    | '/settings/uninstall'
     | '/about'
     | '/agent-chat'
     | '/agent-cli'
@@ -345,6 +369,8 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/appearance'
     | '/_authenticated/settings/display'
     | '/_authenticated/settings/notifications'
+    | '/_authenticated/settings/privacy'
+    | '/_authenticated/settings/uninstall'
     | '/_authenticated/about/'
     | '/_authenticated/agent-chat/'
     | '/_authenticated/agent-cli/'
@@ -526,6 +552,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAboutIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/settings/uninstall': {
+      id: '/_authenticated/settings/uninstall'
+      path: '/uninstall'
+      fullPath: '/settings/uninstall'
+      preLoaderRoute: typeof AuthenticatedSettingsUninstallRouteImport
+      parentRoute: typeof AuthenticatedSettingsRouteRoute
+    }
+    '/_authenticated/settings/privacy': {
+      id: '/_authenticated/settings/privacy'
+      path: '/privacy'
+      fullPath: '/settings/privacy'
+      preLoaderRoute: typeof AuthenticatedSettingsPrivacyRouteImport
+      parentRoute: typeof AuthenticatedSettingsRouteRoute
+    }
     '/_authenticated/settings/notifications': {
       id: '/_authenticated/settings/notifications'
       path: '/notifications'
@@ -569,6 +609,8 @@ interface AuthenticatedSettingsRouteRouteChildren {
   AuthenticatedSettingsAppearanceRoute: typeof AuthenticatedSettingsAppearanceRoute
   AuthenticatedSettingsDisplayRoute: typeof AuthenticatedSettingsDisplayRoute
   AuthenticatedSettingsNotificationsRoute: typeof AuthenticatedSettingsNotificationsRoute
+  AuthenticatedSettingsPrivacyRoute: typeof AuthenticatedSettingsPrivacyRoute
+  AuthenticatedSettingsUninstallRoute: typeof AuthenticatedSettingsUninstallRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
 
@@ -579,6 +621,8 @@ const AuthenticatedSettingsRouteRouteChildren: AuthenticatedSettingsRouteRouteCh
     AuthenticatedSettingsDisplayRoute: AuthenticatedSettingsDisplayRoute,
     AuthenticatedSettingsNotificationsRoute:
       AuthenticatedSettingsNotificationsRoute,
+    AuthenticatedSettingsPrivacyRoute: AuthenticatedSettingsPrivacyRoute,
+    AuthenticatedSettingsUninstallRoute: AuthenticatedSettingsUninstallRoute,
     AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
   }
 
