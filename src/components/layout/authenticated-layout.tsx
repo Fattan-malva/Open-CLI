@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Outlet, useLocation } from '@tanstack/react-router'
 import { getCookie } from '@/lib/cookies'
 import { cn } from '@/lib/utils'
@@ -7,7 +8,9 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { SkipToMain } from '@/components/skip-to-main'
 import { BrowserWorkspace } from '@/features/browser'
+import { SocialWorkspace } from '@/features/social'
 import { TerminalWorkspace } from '@/features/terminal'
+import { watchWebviewOverlays } from '@/lib/webview-overlay'
 
 type AuthenticatedLayoutProps = {
   children?: React.ReactNode
@@ -16,6 +19,12 @@ type AuthenticatedLayoutProps = {
 export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
   const defaultOpen = getCookie('sidebar_state') !== 'false'
   const pathname = useLocation({ select: (location) => location.pathname })
+  const socialSite = pathname.startsWith('/social/')
+    ? (pathname.split('/')[2] ?? null)
+    : null
+
+  useEffect(() => watchWebviewOverlays(), [])
+
   return (
     <SearchProvider>
       <LayoutProvider>
@@ -31,6 +40,7 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
           >
             {children ?? <Outlet />}
             <BrowserWorkspace visible={pathname === '/browser'} />
+            <SocialWorkspace site={socialSite} />
             <TerminalWorkspace visible={pathname === '/terminal'} />
           </SidebarInset>
         </SidebarProvider>

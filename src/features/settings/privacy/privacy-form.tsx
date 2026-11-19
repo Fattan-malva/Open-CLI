@@ -12,6 +12,7 @@ import {
   getBrowserSessionOnly,
   setBrowserSessionOnly,
 } from '@/lib/app'
+import { notifyBrowserDataCleared } from '@/lib/browser'
 import { isDesktop } from '@/lib/platform'
 
 export function PrivacyForm() {
@@ -39,6 +40,7 @@ export function PrivacyForm() {
     setToggling(true)
     try {
       await setBrowserSessionOnly(next)
+      if (next) notifyBrowserDataCleared()
       setSessionOnly(next)
       toast.success(
         next
@@ -60,6 +62,7 @@ export function PrivacyForm() {
     setBusy(true)
     try {
       await clearBrowserData()
+      notifyBrowserDataCleared()
       setConfirmOpen(false)
       toast.success('Cookie dan data browser berhasil dihapus.')
     } catch (error) {

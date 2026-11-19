@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
 import { Badge } from '@/components/ui/badge'
@@ -15,6 +16,7 @@ export function AgentCli() {
   const [customAgents, setCustomAgents] = useState<AgentCliItem[]>([])
   const [activeIds, setActiveIds] = useState<Set<string>>(() => new Set())
   const [hydrated, setHydrated] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<AgentCliItem | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -137,13 +139,41 @@ export function AgentCli() {
                   agent={agent}
                   active={activeIds.has(agent.id)}
                   onToggle={() => toggleAgent(agent.id)}
-                  onRemove={agent.custom ? removeAgent : undefined}
+                  onRemove={
+                    agent.custom
+                      ? (id) =>
+                          setPendingDelete(
+                            customAgents.find((item) => item.id === id) ?? null
+                          )
+                      : undefined
+                  }
                 />
               ))}
             </div>
           </div>
         </div>
       </Main>
+
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(next) => {
+          if (!next) setPendingDelete(null)
+        }}
+        title='Hapus agent CLI kustom?'
+        desc={
+          <>
+            <strong>{pendingDelete?.name ?? 'Agent'}</strong> akan dihapus dari
+            daftar Agent CLI. Shortcut yang dipakai agent ini akan tersedia lagi.
+          </>
+        }
+        confirmText='Hapus'
+        cancelBtnText='Batal'
+        destructive
+        handleConfirm={() => {
+          if (pendingDelete) removeAgent(pendingDelete.id)
+          setPendingDelete(null)
+        }}
+      />
 
       <AddAgentDialog
         open={open}

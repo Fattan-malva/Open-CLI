@@ -10,6 +10,15 @@ import {
   Info,
   Workflow,
 } from 'lucide-react'
+import {
+  IconDiscord,
+  IconGithub,
+  IconGmail,
+  IconMicrosoft,
+  IconTelegram,
+  IconWhatsapp,
+  IconZoom,
+} from '@/assets/brand-icons'
 import { type SidebarData } from '../types'
 
 export const sidebarData: SidebarData = {
@@ -60,16 +69,56 @@ export const sidebarData: SidebarData = {
           icon: Bot,
         },
         {
-          title: 'Agent Chat',
+          title: 'Orchestration',
           url: '/agent-chat',
           icon: MessageSquare,
           badge: 'Soon',
         },
         {
-          title: 'Agent Flow',
+          title: 'Custom Provider',
           url: '/agent-flow',
           icon: Workflow,
           badge: 'Soon',
+        },
+      ],
+    },
+    {
+      title: 'Social',
+      items: [
+        {
+          title: 'WhatsApp',
+          url: '/social/whatsapp',
+          icon: IconWhatsapp,
+        },
+        {
+          title: 'Discord',
+          url: '/social/discord',
+          icon: IconDiscord,
+        },
+        {
+          title: 'GitHub',
+          url: '/social/github',
+          icon: IconGithub,
+        },
+        {
+          title: 'Zoom',
+          url: '/social/zoom',
+          icon: IconZoom,
+        },
+        {
+          title: 'Telegram',
+          url: '/social/telegram',
+          icon: IconTelegram,
+        },
+        {
+          title: 'Gmail',
+          url: '/social/gmail',
+          icon: IconGmail,
+        },
+        {
+          title: 'Microsoft.com',
+          url: '/social/microsoft',
+          icon: IconMicrosoft,
         },
       ],
     },

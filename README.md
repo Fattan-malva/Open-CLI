@@ -5,6 +5,7 @@
 - **Authentication**: Email/password with Clerk integration (optional)
 - **Desktop App**: Tauri v2 with native terminal (PTY), embedded browser, window controls
 - **Agent CLI**: Custom agents, unique `Alt + letter` shortcuts, project picker, unified launcher dropdown
+- **Social**: Fixed webviews for WhatsApp, Discord, GitHub, Zoom, Telegram, Gmail, and Microsoft.com; collapsible group, persistent tabs, and drag-reorderable menu with saved order
 - **Dashboard**: Users, Tasks, Settings (Profile, Account, Appearance, Notifications, Display, Privacy, Uninstall)
 - **Global Search**: Command palette with keyboard shortcuts (⌘K / Ctrl+K)
 - **Theming**: Light/Dark/System with persistence

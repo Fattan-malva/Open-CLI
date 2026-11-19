@@ -7,6 +7,7 @@ import { Main } from '@/components/layout/main'
 import { Button } from '@/components/ui/button'
 import { useSidebar } from '@/components/ui/sidebar'
 import {
+  BROWSER_DATA_CLEARED_EVENT,
   closeAllBrowserTabs,
   closeBrowserTab,
   createBrowserTab,
@@ -18,6 +19,10 @@ import {
 } from '@/lib/browser'
 import { isDesktop } from '@/lib/platform'
 import { cn } from '@/lib/utils'
+import {
+  isWebviewOverlayOpen,
+  WEBVIEW_OVERLAY_EVENT,
+} from '@/lib/webview-overlay'
 
 type BrowserTab = {
   id: string
@@ -94,7 +99,11 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
     if (!isDesktop) return
 
     const latest = latestRef.current
-    if (!latest.visible || !latest.activeLabel) {
+    if (
+      !latest.visible ||
+      !latest.activeLabel ||
+      isWebviewOverlayOpen()
+    ) {
       await syncBrowserTabs(latest.labels, null, getBounds())
       return
     }
@@ -234,6 +243,16 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
   }, [])
 
   useEffect(() => {
+    const reset = () => {
+      pendingTitles.current.clear()
+      setTabs([])
+      setActiveId(null)
+    }
+    window.addEventListener(BROWSER_DATA_CLEARED_EVENT, reset)
+    return () => window.removeEventListener(BROWSER_DATA_CLEARED_EVENT, reset)
+  }, [])
+
+  useEffect(() => {
     latestRef.current = {
       visible,
       activeLabel,
@@ -241,6 +260,12 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
     }
     void sync()
   }, [visible, activeLabel, tabs, sidebarState, sync])
+
+  useEffect(() => {
+    const resync = () => void sync()
+    window.addEventListener(WEBVIEW_OVERLAY_EVENT, resync)
+    return () => window.removeEventListener(WEBVIEW_OVERLAY_EVENT, resync)
+  }, [sync])
 
   useEffect(() => {
     const element = viewportRef.current

@@ -4,7 +4,7 @@ import { Main } from '@/components/layout/main'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 
-const APP_VERSION = '0.1.0'
+const APP_VERSION = '1.1.0'
 
 export const Route = createFileRoute('/_authenticated/about/')({
   component: function AboutRoute() {

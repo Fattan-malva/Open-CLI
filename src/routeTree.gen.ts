@@ -31,6 +31,7 @@ import { Route as AuthenticatedAgentFlowIndexRouteImport } from './routes/_authe
 import { Route as AuthenticatedAgentCliIndexRouteImport } from './routes/_authenticated/agent-cli/index'
 import { Route as AuthenticatedAgentChatIndexRouteImport } from './routes/_authenticated/agent-chat/index'
 import { Route as AuthenticatedAboutIndexRouteImport } from './routes/_authenticated/about/index'
+import { Route as AuthenticatedSocialSiteRouteImport } from './routes/_authenticated/social.$site'
 import { Route as AuthenticatedSettingsUninstallRouteImport } from './routes/_authenticated/settings/uninstall'
 import { Route as AuthenticatedSettingsPrivacyRouteImport } from './routes/_authenticated/settings/privacy'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
@@ -156,6 +157,11 @@ const AuthenticatedAboutIndexRoute = AuthenticatedAboutIndexRouteImport.update({
   path: '/about/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedSocialSiteRoute = AuthenticatedSocialSiteRouteImport.update({
+  id: '/social/$site',
+  path: '/social/$site',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedSettingsUninstallRoute =
   AuthenticatedSettingsUninstallRouteImport.update({
     id: '/uninstall',
@@ -218,6 +224,7 @@ export interface FileRoutesByFullPath {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/settings/privacy': typeof AuthenticatedSettingsPrivacyRoute
   '/settings/uninstall': typeof AuthenticatedSettingsUninstallRoute
+  '/social/$site': typeof AuthenticatedSocialSiteRoute
   '/about/': typeof AuthenticatedAboutIndexRoute
   '/agent-chat/': typeof AuthenticatedAgentChatIndexRoute
   '/agent-cli/': typeof AuthenticatedAgentCliIndexRoute
@@ -247,6 +254,7 @@ export interface FileRoutesByTo {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/settings/privacy': typeof AuthenticatedSettingsPrivacyRoute
   '/settings/uninstall': typeof AuthenticatedSettingsUninstallRoute
+  '/social/$site': typeof AuthenticatedSocialSiteRoute
   '/about': typeof AuthenticatedAboutIndexRoute
   '/agent-chat': typeof AuthenticatedAgentChatIndexRoute
   '/agent-cli': typeof AuthenticatedAgentCliIndexRoute
@@ -279,6 +287,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/_authenticated/settings/privacy': typeof AuthenticatedSettingsPrivacyRoute
   '/_authenticated/settings/uninstall': typeof AuthenticatedSettingsUninstallRoute
+  '/_authenticated/social/$site': typeof AuthenticatedSocialSiteRoute
   '/_authenticated/about/': typeof AuthenticatedAboutIndexRoute
   '/_authenticated/agent-chat/': typeof AuthenticatedAgentChatIndexRoute
   '/_authenticated/agent-cli/': typeof AuthenticatedAgentCliIndexRoute
@@ -311,6 +320,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/privacy'
     | '/settings/uninstall'
+    | '/social/$site'
     | '/about/'
     | '/agent-chat/'
     | '/agent-cli/'
@@ -340,6 +350,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/privacy'
     | '/settings/uninstall'
+    | '/social/$site'
     | '/about'
     | '/agent-chat'
     | '/agent-cli'
@@ -371,6 +382,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/notifications'
     | '/_authenticated/settings/privacy'
     | '/_authenticated/settings/uninstall'
+    | '/_authenticated/social/$site'
     | '/_authenticated/about/'
     | '/_authenticated/agent-chat/'
     | '/_authenticated/agent-cli/'
@@ -552,6 +564,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAboutIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/social/$site': {
+      id: '/_authenticated/social/$site'
+      path: '/social/$site'
+      fullPath: '/social/$site'
+      preLoaderRoute: typeof AuthenticatedSocialSiteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/settings/uninstall': {
       id: '/_authenticated/settings/uninstall'
       path: '/uninstall'
@@ -635,6 +654,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
+  AuthenticatedSocialSiteRoute: typeof AuthenticatedSocialSiteRoute
   AuthenticatedAboutIndexRoute: typeof AuthenticatedAboutIndexRoute
   AuthenticatedAgentChatIndexRoute: typeof AuthenticatedAgentChatIndexRoute
   AuthenticatedAgentCliIndexRoute: typeof AuthenticatedAgentCliIndexRoute
@@ -650,6 +670,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
+  AuthenticatedSocialSiteRoute: AuthenticatedSocialSiteRoute,
   AuthenticatedAboutIndexRoute: AuthenticatedAboutIndexRoute,
   AuthenticatedAgentChatIndexRoute: AuthenticatedAgentChatIndexRoute,
   AuthenticatedAgentCliIndexRoute: AuthenticatedAgentCliIndexRoute,

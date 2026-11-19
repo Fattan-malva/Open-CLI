@@ -16,6 +16,7 @@ type BaseNavItem = {
   title: string
   badge?: string
   icon?: React.ElementType
+  canDelete?: boolean
 }
 
 type NavLink = BaseNavItem & {
@@ -33,6 +34,12 @@ type NavItem = NavCollapsible | NavLink
 type NavGroup = {
   title: string
   items: NavItem[]
+  reorderable?: boolean
+  onReorder?: (fromKey: string, toKey: string) => void
+  collapsible?: boolean
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
+  showAddSocial?: boolean
 }
 
 type SidebarData = {

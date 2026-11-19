@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { isDesktop } from './platform'
 
+export const BROWSER_DATA_CLEARED_EVENT = 'opencli:browser-data-cleared'
+
 export type BrowserBounds = {
   x: number
   y: number
@@ -104,4 +106,8 @@ export async function closeBrowserTab(label: string): Promise<void> {
 export async function closeAllBrowserTabs(): Promise<void> {
   if (!isDesktop) return
   await invoke('browser_tabs_close_all')
+}
+
+export function notifyBrowserDataCleared() {
+  window.dispatchEvent(new Event(BROWSER_DATA_CLEARED_EVENT))
 }
