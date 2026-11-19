@@ -80,27 +80,36 @@ pnpm run desktop:dev
 # Build desktop app + installer NSIS
 pnpm run desktop:build
 
-# Build portable release ke release/OpenCLI
+# Build installer NSIS ke release
 pnpm run desktop:build:release
 
-# Clean build lalu build portable release
+# Clean build lalu build installer NSIS
 pnpm run desktop:build:release:clean
 
 # Bersihkan artifact build saja
 pnpm run build:clean
 ```
 
-### Portable Release
+### Installer Release
 
-`pnpm run desktop:build:release` menghasilkan folder:
+`pnpm run desktop:build:release` menghasilkan satu file installer:
 
 ```text
-release/OpenCLI/
-├── OpenCLI.exe
-└── README.txt
+release/
+└── opencli-<version>.exe
 ```
 
-Folder `release/OpenCLI` bisa dipindah ke lokasi mana pun selama masih di Windows. Jalankan `OpenCLI.exe` langsung; tidak perlu instalasi. Data aplikasi tetap dibuat di `%USERPROFILE%\.config\opencli`, bukan di folder portable. Jika ingin menyertakan WebView2 bootstrapper untuk Windows 10, letakkan `MicrosoftEdgeWebview2Setup.exe` di `scripts/assets/` sebelum build; file itu akan ikut disalin.
+`<version>` berasal dari `package.json`. Installer NSIS otomatis mengunduh dan memasang WebView2 runtime jika belum tersedia, sehingga memerlukan internet saat instalasi pada mesin tanpa WebView2. Data aplikasi tetap dibuat di `%USERPROFILE%\.config\opencli`, bukan di folder instalasi.
+
+### Version
+
+Ubah versi hanya di `package.json`. Saat `pnpm run version:sync`, `pnpm run dev`, atau build dijalankan, versi tersebut otomatis disamakan ke:
+
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- halaman About
+- nama file installer
 
 ### Testing
 
@@ -176,8 +185,9 @@ Without the key, the Clerk routes show setup instructions. The main app uses a s
 | `pnpm run dev` | Start web dev server |
 | `pnpm run desktop:dev` | Start Tauri dev |
 | `pnpm run desktop:build` | Build desktop app + NSIS installer |
-| `pnpm run desktop:build:release` | Build portable folder `release/OpenCLI` |
-| `pnpm run desktop:build:release:clean` | Clean build, lalu build portable `release/OpenCLI` |
+| `pnpm run version:sync` | Samakan versi dari `package.json` ke semua file |
+| `pnpm run desktop:build:release` | Build installer `release/opencli-<version>.exe` |
+| `pnpm run desktop:build:release:clean` | Clean build, lalu build installer NSIS |
 | `pnpm run build:clean` | Hapus artifact build |
 | `pnpm run build` | Type check + Vite build |
 | `pnpm run lint` | ESLint |

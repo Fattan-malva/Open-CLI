@@ -1,6 +1,6 @@
 [package]
 name = "open-cli"
-version = "0.1.0"
+version = "1.2.0"
 description = "Open CLI desktop terminal"
 authors = ["Open CLI"]
 edition = "2021"

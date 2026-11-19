@@ -4,9 +4,10 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root 'release'
-$portable = Join-Path $release 'OpenCLI'
 $manifest = Join-Path $root 'src-tauri\Cargo.toml'
 $target = Join-Path $root 'src-tauri\target'
+$packageJson = Join-Path $root 'package.json'
+$installerDir = Join-Path $root 'src-tauri\target\release\bundle\nsis'
 
 function Stop-OpenCliProcesses {
   Get-Process -Name 'OpenCLI', 'open-cli' -ErrorAction SilentlyContinue |
@@ -51,41 +52,32 @@ if ($Clean) {
   }
 }
 
-if (Test-Path -LiteralPath $portable) {
-  Remove-PathWithRetry -Path $portable
+if (-not (Test-Path -LiteralPath $release)) {
+  New-Item -ItemType Directory -Path $release -Force | Out-Null
 }
-New-Item -ItemType Directory -Path $portable -Force | Out-Null
 
-& pnpm exec tauri build --no-bundle --ci
+Get-ChildItem -LiteralPath $release -Filter 'opencli-*.exe' -ErrorAction SilentlyContinue |
+  Remove-Item -Force -ErrorAction SilentlyContinue
+
+& pnpm run version:sync
 if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-$exe = Join-Path $root 'src-tauri\target\release\open-cli.exe'
-if (-not (Test-Path -LiteralPath $exe)) {
-  throw "Executable tidak ditemukan: $exe"
-}
-Copy-Item -LiteralPath $exe -Destination (Join-Path $portable 'OpenCLI.exe') -Force
-
-$bootstrapper = Join-Path $root 'scripts\assets\MicrosoftEdgeWebview2Setup.exe'
-if (Test-Path -LiteralPath $bootstrapper) {
-  Copy-Item -LiteralPath $bootstrapper -Destination (Join-Path $portable 'MicrosoftEdgeWebview2Setup.exe') -Force
+& pnpm exec tauri build --ci
+if ($LASTEXITCODE -ne 0) {
+  exit $LASTEXITCODE
 }
 
-$info = @"
-Open CLI portable
+$installers = @(Get-ChildItem -LiteralPath $installerDir -Filter '*.exe' -ErrorAction SilentlyContinue)
+if ($installers.Count -eq 0) {
+  throw "Installer NSIS tidak ditemukan di: $installerDir"
+}
 
-Jalankan OpenCLI.exe dari folder ini. Aplikasi tidak perlu diinstal.
+$installer = $installers | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$version = (Get-Content -LiteralPath $packageJson -Raw | ConvertFrom-Json).version
+$destination = Join-Path $release "opencli-$version.exe"
 
-Data aplikasi dan profil browser disimpan di:
-%USERPROFILE%\.config\opencli
+Copy-Item -LiteralPath $installer.FullName -Destination $destination -Force
 
-Build development memakai:
-%USERPROFILE%\.config\opencli-dev
-
-WebView2 runtime diperlukan. Windows 11 sudah menyertakannya. Untuk Windows 10,
-jalankan MicrosoftEdgeWebview2Setup.exe jika file tersebut disertakan.
-"@
-Set-Content -LiteralPath (Join-Path $portable 'README.txt') -Value $info -Encoding UTF8
-
-Write-Host "Release portable siap: $portable"
+Write-Host "Release installer siap: $destination"
