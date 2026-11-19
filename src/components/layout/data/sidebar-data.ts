@@ -1,11 +1,14 @@
 import {
+  Bot,
   Globe,
   HelpCircle,
   LayoutDashboard,
   ListTodo,
+  MessageSquare,
   Settings,
   Terminal,
   Info,
+  Workflow,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
@@ -45,6 +48,28 @@ export const sidebarData: SidebarData = {
           title: 'Tasks',
           url: '/tasks',
           icon: ListTodo,
+        },
+      ],
+    },
+    {
+      title: 'Agent AI',
+      items: [
+        {
+          title: 'Agent CLI',
+          url: '/agent-cli',
+          icon: Bot,
+        },
+        {
+          title: 'Agent Chat',
+          url: '/agent-chat',
+          icon: MessageSquare,
+          badge: 'Soon',
+        },
+        {
+          title: 'Agent Flow',
+          url: '/agent-flow',
+          icon: Workflow,
+          badge: 'Soon',
         },
       ],
     },

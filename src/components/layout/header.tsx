@@ -92,6 +92,11 @@ export function Header({ className, fixed, children, ...props }: HeaderProps) {
     }
   }, [appWindow])
 
+  const startWindowDrag = () => {
+    if (!appWindow) return
+    void appWindow.startDragging().catch(() => undefined)
+  }
+
   const toggleMaximize = () => {
     if (!appWindow) return
     void appWindow
@@ -112,9 +117,12 @@ export function Header({ className, fixed, children, ...props }: HeaderProps) {
     >
       {appWindow && (
         <div
-          data-tauri-drag-region
           className='absolute inset-0 z-0 cursor-default'
-          onDoubleClick={toggleMaximize}
+          onMouseDown={(event) => {
+            if (event.button !== 0) return
+            event.preventDefault()
+            startWindowDrag()
+          }}
         />
       )}
       <div

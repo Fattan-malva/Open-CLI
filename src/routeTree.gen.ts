@@ -27,6 +27,9 @@ import { Route as AuthenticatedTasksIndexRouteImport } from './routes/_authentic
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
 import { Route as AuthenticatedBrowserIndexRouteImport } from './routes/_authenticated/browser/index'
+import { Route as AuthenticatedAgentFlowIndexRouteImport } from './routes/_authenticated/agent-flow/index'
+import { Route as AuthenticatedAgentCliIndexRouteImport } from './routes/_authenticated/agent-cli/index'
+import { Route as AuthenticatedAgentChatIndexRouteImport } from './routes/_authenticated/agent-chat/index'
 import { Route as AuthenticatedAboutIndexRouteImport } from './routes/_authenticated/about/index'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
@@ -128,6 +131,24 @@ const AuthenticatedBrowserIndexRoute =
     path: '/browser/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedAgentFlowIndexRoute =
+  AuthenticatedAgentFlowIndexRouteImport.update({
+    id: '/agent-flow/',
+    path: '/agent-flow/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAgentCliIndexRoute =
+  AuthenticatedAgentCliIndexRouteImport.update({
+    id: '/agent-cli/',
+    path: '/agent-cli/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAgentChatIndexRoute =
+  AuthenticatedAgentChatIndexRouteImport.update({
+    id: '/agent-chat/',
+    path: '/agent-chat/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAboutIndexRoute = AuthenticatedAboutIndexRouteImport.update({
   id: '/about/',
   path: '/about/',
@@ -182,6 +203,9 @@ export interface FileRoutesByFullPath {
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/about/': typeof AuthenticatedAboutIndexRoute
+  '/agent-chat/': typeof AuthenticatedAgentChatIndexRoute
+  '/agent-cli/': typeof AuthenticatedAgentCliIndexRoute
+  '/agent-flow/': typeof AuthenticatedAgentFlowIndexRoute
   '/browser/': typeof AuthenticatedBrowserIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
@@ -206,6 +230,9 @@ export interface FileRoutesByTo {
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/about': typeof AuthenticatedAboutIndexRoute
+  '/agent-chat': typeof AuthenticatedAgentChatIndexRoute
+  '/agent-cli': typeof AuthenticatedAgentCliIndexRoute
+  '/agent-flow': typeof AuthenticatedAgentFlowIndexRoute
   '/browser': typeof AuthenticatedBrowserIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
@@ -233,6 +260,9 @@ export interface FileRoutesById {
   '/_authenticated/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/_authenticated/about/': typeof AuthenticatedAboutIndexRoute
+  '/_authenticated/agent-chat/': typeof AuthenticatedAgentChatIndexRoute
+  '/_authenticated/agent-cli/': typeof AuthenticatedAgentCliIndexRoute
+  '/_authenticated/agent-flow/': typeof AuthenticatedAgentFlowIndexRoute
   '/_authenticated/browser/': typeof AuthenticatedBrowserIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
@@ -260,6 +290,9 @@ export interface FileRouteTypes {
     | '/settings/display'
     | '/settings/notifications'
     | '/about/'
+    | '/agent-chat/'
+    | '/agent-cli/'
+    | '/agent-flow/'
     | '/browser/'
     | '/help-center/'
     | '/settings/'
@@ -284,6 +317,9 @@ export interface FileRouteTypes {
     | '/settings/display'
     | '/settings/notifications'
     | '/about'
+    | '/agent-chat'
+    | '/agent-cli'
+    | '/agent-flow'
     | '/browser'
     | '/help-center'
     | '/settings'
@@ -310,6 +346,9 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/display'
     | '/_authenticated/settings/notifications'
     | '/_authenticated/about/'
+    | '/_authenticated/agent-chat/'
+    | '/_authenticated/agent-cli/'
+    | '/_authenticated/agent-flow/'
     | '/_authenticated/browser/'
     | '/_authenticated/help-center/'
     | '/_authenticated/settings/'
@@ -459,6 +498,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBrowserIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/agent-flow/': {
+      id: '/_authenticated/agent-flow/'
+      path: '/agent-flow'
+      fullPath: '/agent-flow/'
+      preLoaderRoute: typeof AuthenticatedAgentFlowIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/agent-cli/': {
+      id: '/_authenticated/agent-cli/'
+      path: '/agent-cli'
+      fullPath: '/agent-cli/'
+      preLoaderRoute: typeof AuthenticatedAgentCliIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/agent-chat/': {
+      id: '/_authenticated/agent-chat/'
+      path: '/agent-chat'
+      fullPath: '/agent-chat/'
+      preLoaderRoute: typeof AuthenticatedAgentChatIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/about/': {
       id: '/_authenticated/about/'
       path: '/about'
@@ -532,6 +592,9 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedAboutIndexRoute: typeof AuthenticatedAboutIndexRoute
+  AuthenticatedAgentChatIndexRoute: typeof AuthenticatedAgentChatIndexRoute
+  AuthenticatedAgentCliIndexRoute: typeof AuthenticatedAgentCliIndexRoute
+  AuthenticatedAgentFlowIndexRoute: typeof AuthenticatedAgentFlowIndexRoute
   AuthenticatedBrowserIndexRoute: typeof AuthenticatedBrowserIndexRoute
   AuthenticatedHelpCenterIndexRoute: typeof AuthenticatedHelpCenterIndexRoute
   AuthenticatedTasksIndexRoute: typeof AuthenticatedTasksIndexRoute
@@ -544,6 +607,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedAboutIndexRoute: AuthenticatedAboutIndexRoute,
+  AuthenticatedAgentChatIndexRoute: AuthenticatedAgentChatIndexRoute,
+  AuthenticatedAgentCliIndexRoute: AuthenticatedAgentCliIndexRoute,
+  AuthenticatedAgentFlowIndexRoute: AuthenticatedAgentFlowIndexRoute,
   AuthenticatedBrowserIndexRoute: AuthenticatedBrowserIndexRoute,
   AuthenticatedHelpCenterIndexRoute: AuthenticatedHelpCenterIndexRoute,
   AuthenticatedTasksIndexRoute: AuthenticatedTasksIndexRoute,
