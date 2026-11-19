@@ -7,6 +7,7 @@ import { SearchProvider } from '@/context/search-provider'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { SkipToMain } from '@/components/skip-to-main'
+import { BrainstormingWorkspace } from '@/features/brainstorming'
 import { BrowserWorkspace } from '@/features/browser'
 import { SocialWorkspace } from '@/features/social'
 import { TerminalWorkspace } from '@/features/terminal'
@@ -40,6 +41,7 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
           >
             {children ?? <Outlet />}
             <BrowserWorkspace visible={pathname === '/browser'} />
+            <BrainstormingWorkspace visible={pathname === '/brainstorming'} />
             <SocialWorkspace site={socialSite} />
             <TerminalWorkspace visible={pathname === '/terminal'} />
           </SidebarInset>

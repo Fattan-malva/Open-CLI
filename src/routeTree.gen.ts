@@ -27,6 +27,7 @@ import { Route as AuthenticatedTasksIndexRouteImport } from './routes/_authentic
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
 import { Route as AuthenticatedBrowserIndexRouteImport } from './routes/_authenticated/browser/index'
+import { Route as AuthenticatedBrainstormingIndexRouteImport } from './routes/_authenticated/brainstorming/index'
 import { Route as AuthenticatedAgentFlowIndexRouteImport } from './routes/_authenticated/agent-flow/index'
 import { Route as AuthenticatedAgentCliIndexRouteImport } from './routes/_authenticated/agent-cli/index'
 import { Route as AuthenticatedAgentChatIndexRouteImport } from './routes/_authenticated/agent-chat/index'
@@ -134,6 +135,12 @@ const AuthenticatedBrowserIndexRoute =
     path: '/browser/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedBrainstormingIndexRoute =
+  AuthenticatedBrainstormingIndexRouteImport.update({
+    id: '/brainstorming/',
+    path: '/brainstorming/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAgentFlowIndexRoute =
   AuthenticatedAgentFlowIndexRouteImport.update({
     id: '/agent-flow/',
@@ -229,6 +236,7 @@ export interface FileRoutesByFullPath {
   '/agent-chat/': typeof AuthenticatedAgentChatIndexRoute
   '/agent-cli/': typeof AuthenticatedAgentCliIndexRoute
   '/agent-flow/': typeof AuthenticatedAgentFlowIndexRoute
+  '/brainstorming/': typeof AuthenticatedBrainstormingIndexRoute
   '/browser/': typeof AuthenticatedBrowserIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
@@ -259,6 +267,7 @@ export interface FileRoutesByTo {
   '/agent-chat': typeof AuthenticatedAgentChatIndexRoute
   '/agent-cli': typeof AuthenticatedAgentCliIndexRoute
   '/agent-flow': typeof AuthenticatedAgentFlowIndexRoute
+  '/brainstorming': typeof AuthenticatedBrainstormingIndexRoute
   '/browser': typeof AuthenticatedBrowserIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
@@ -292,6 +301,7 @@ export interface FileRoutesById {
   '/_authenticated/agent-chat/': typeof AuthenticatedAgentChatIndexRoute
   '/_authenticated/agent-cli/': typeof AuthenticatedAgentCliIndexRoute
   '/_authenticated/agent-flow/': typeof AuthenticatedAgentFlowIndexRoute
+  '/_authenticated/brainstorming/': typeof AuthenticatedBrainstormingIndexRoute
   '/_authenticated/browser/': typeof AuthenticatedBrowserIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
@@ -325,6 +335,7 @@ export interface FileRouteTypes {
     | '/agent-chat/'
     | '/agent-cli/'
     | '/agent-flow/'
+    | '/brainstorming/'
     | '/browser/'
     | '/help-center/'
     | '/settings/'
@@ -355,6 +366,7 @@ export interface FileRouteTypes {
     | '/agent-chat'
     | '/agent-cli'
     | '/agent-flow'
+    | '/brainstorming'
     | '/browser'
     | '/help-center'
     | '/settings'
@@ -387,6 +399,7 @@ export interface FileRouteTypes {
     | '/_authenticated/agent-chat/'
     | '/_authenticated/agent-cli/'
     | '/_authenticated/agent-flow/'
+    | '/_authenticated/brainstorming/'
     | '/_authenticated/browser/'
     | '/_authenticated/help-center/'
     | '/_authenticated/settings/'
@@ -536,6 +549,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBrowserIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/brainstorming/': {
+      id: '/_authenticated/brainstorming/'
+      path: '/brainstorming'
+      fullPath: '/brainstorming/'
+      preLoaderRoute: typeof AuthenticatedBrainstormingIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/agent-flow/': {
       id: '/_authenticated/agent-flow/'
       path: '/agent-flow'
@@ -659,6 +679,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAgentChatIndexRoute: typeof AuthenticatedAgentChatIndexRoute
   AuthenticatedAgentCliIndexRoute: typeof AuthenticatedAgentCliIndexRoute
   AuthenticatedAgentFlowIndexRoute: typeof AuthenticatedAgentFlowIndexRoute
+  AuthenticatedBrainstormingIndexRoute: typeof AuthenticatedBrainstormingIndexRoute
   AuthenticatedBrowserIndexRoute: typeof AuthenticatedBrowserIndexRoute
   AuthenticatedHelpCenterIndexRoute: typeof AuthenticatedHelpCenterIndexRoute
   AuthenticatedTasksIndexRoute: typeof AuthenticatedTasksIndexRoute
@@ -675,6 +696,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAgentChatIndexRoute: AuthenticatedAgentChatIndexRoute,
   AuthenticatedAgentCliIndexRoute: AuthenticatedAgentCliIndexRoute,
   AuthenticatedAgentFlowIndexRoute: AuthenticatedAgentFlowIndexRoute,
+  AuthenticatedBrainstormingIndexRoute: AuthenticatedBrainstormingIndexRoute,
   AuthenticatedBrowserIndexRoute: AuthenticatedBrowserIndexRoute,
   AuthenticatedHelpCenterIndexRoute: AuthenticatedHelpCenterIndexRoute,
   AuthenticatedTasksIndexRoute: AuthenticatedTasksIndexRoute,

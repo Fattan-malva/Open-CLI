@@ -1,5 +1,6 @@
 import {
   Bot,
+  Brain,
   Globe,
   HelpCircle,
   LayoutDashboard,
@@ -47,6 +48,11 @@ export const sidebarData: SidebarData = {
           title: 'Browser',
           url: '/browser',
           icon: Globe,
+        },
+        {
+          title: 'Brainstorming',
+          url: '/brainstorming',
+          icon: Brain,
         },
         {
           title: 'Dashboard',
