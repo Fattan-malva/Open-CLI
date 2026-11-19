@@ -423,6 +423,13 @@ fn kill_all(state: &PtyState) {
 }
 
 const BROWSER_WEBVIEW_LABEL: &str = "browser-view";
+const BROWSER_TITLE_EVENT: &str = "browser-tab-title";
+
+#[derive(Clone, Serialize)]
+struct BrowserTitleEvent {
+    label: String,
+    title: String,
+}
 
 fn browser_bounds(x: f64, y: f64, width: f64, height: f64) -> Rect {
     Rect {
@@ -508,6 +515,8 @@ async fn browser_tab_create(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
+    let title_app = app.clone();
+
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         if app.get_webview(&label).is_some() {
             return Ok(());
@@ -517,10 +526,20 @@ async fn browser_tab_create(
             .get_window("main")
             .ok_or_else(|| "jendela utama tidak ditemukan".to_string())?;
         let target = tauri::Url::parse(&url).map_err(|error| error.to_string())?;
+        let title_label = label.clone();
 
         let webview = window
             .add_child(
-                tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(target)),
+                tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(target))
+                    .on_document_title_changed(move |_webview, title| {
+                        let _ = title_app.emit(
+                            BROWSER_TITLE_EVENT,
+                            BrowserTitleEvent {
+                                label: title_label.clone(),
+                                title,
+                            },
+                        );
+                    }),
                 LogicalPosition::new(x, y),
                 LogicalSize::new(width, height),
             )
@@ -592,6 +611,30 @@ async fn browser_tab_close(app: AppHandle, label: String) -> Result<(), String> 
     Ok(())
 }
 
+#[tauri::command]
+async fn browser_tabs_close_all(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let webviews = app.webviews();
+        let labels: Vec<String> = webviews
+            .keys()
+            .cloned()
+            .filter(|label| {
+                label.starts_with("browser-tab-") || label == BROWSER_WEBVIEW_LABEL
+            })
+            .collect();
+
+        for label in labels {
+            if let Some(webview) = app.get_webview(&label) {
+                webview.close().map_err(|error| error.to_string())?;
+            }
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(PtyState::default())
@@ -607,7 +650,8 @@ pub fn run() {
             browser_tab_create,
             browser_tab_navigate,
             browser_tab_sync,
-            browser_tab_close
+            browser_tab_close,
+            browser_tabs_close_all
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {

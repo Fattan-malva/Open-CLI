@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { Lock, Plus, RotateCw, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
@@ -6,6 +7,7 @@ import { Main } from '@/components/layout/main'
 import { Button } from '@/components/ui/button'
 import { useSidebar } from '@/components/ui/sidebar'
 import {
+  closeAllBrowserTabs,
   closeBrowserTab,
   createBrowserTab,
   navigateBrowserTab,
@@ -24,12 +26,23 @@ type BrowserTab = {
   title: string
 }
 
+type BrowserTitlePayload = {
+  label: string
+  title: string
+}
+
 function hostFromUrl(value: string) {
+  if (!value) return 'Tab baru'
   try {
     return new URL(value).hostname.replace(/^www\./, '')
   } catch {
     return 'Tab baru'
   }
+}
+
+function createTabId() {
+  const suffix = Math.random().toString(36).slice(2, 8)
+  return `browser-tab-${Date.now().toString(36)}-${suffix}`
 }
 
 type BrowserWorkspaceProps = {
@@ -44,8 +57,7 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
   const [draftForId, setDraftForId] = useState<string | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const nextId = useRef(1)
-  const initialized = useRef(false)
+  const pendingTitles = useRef(new Map<string, string>())
   const latestRef = useRef({
     visible,
     activeLabel: null as string | null,
@@ -56,7 +68,7 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
     () => tabs.find((tab) => tab.id === activeId) ?? null,
     [tabs, activeId]
   )
-  const activeLabel = activeTab?.label ?? null
+  const activeLabel = activeTab?.url ? activeTab.label : null
   const input = draftForId === activeId ? draft : (activeTab?.url ?? '')
 
   const getBounds = useCallback((): BrowserBounds => {
@@ -93,13 +105,24 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
   const addTab = useCallback(
     async (value?: string) => {
       try {
-        const url = resolveBrowserTarget(value || 'https://www.google.com')
-        const id = `browser-tab-${nextId.current++}`
-        await createBrowserTab(id, url, getBounds())
-        setTabs((previous) => [
-          ...previous,
-          { id, label: id, url, title: hostFromUrl(url) },
-        ])
+        const id = createTabId()
+
+        if (value) {
+          const url = resolveBrowserTarget(value)
+          await createBrowserTab(id, url, getBounds())
+          const title = pendingTitles.current.get(id) ?? hostFromUrl(url)
+          pendingTitles.current.delete(id)
+          setTabs((previous) => [
+            ...previous,
+            { id, label: id, url, title },
+          ])
+        } else {
+          setTabs((previous) => [
+            ...previous,
+            { id, label: id, url: '', title: 'Tab baru' },
+          ])
+        }
+
         setActiveId(id)
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Gagal membuat tab.')
@@ -115,32 +138,40 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
 
       try {
         const url = resolveBrowserTarget(input)
-        if (!activeLabel) {
+        const title = hostFromUrl(url)
+
+        if (!activeTab) {
           await addTab(url)
-          setDraft('')
-          setDraftForId(null)
-          return
+        } else if (!activeTab.url) {
+          await createBrowserTab(activeTab.label, url, getBounds())
+          const webTitle =
+            pendingTitles.current.get(activeTab.label) ?? title
+          pendingTitles.current.delete(activeTab.label)
+          setTabs((previous) =>
+            previous.map((tab) =>
+              tab.id === activeTab.id ? { ...tab, url, title: webTitle } : tab
+            )
+          )
+        } else {
+          await navigateBrowserTab(activeTab.label, url)
+          setTabs((previous) =>
+            previous.map((tab) =>
+              tab.id === activeTab.id ? { ...tab, url, title } : tab
+            )
+          )
         }
 
-        await navigateBrowserTab(activeLabel, url)
-        setTabs((previous) =>
-          previous.map((tab) =>
-            tab.label === activeLabel
-              ? { ...tab, url, title: hostFromUrl(url) }
-              : tab
-          )
-        )
         setDraft('')
         setDraftForId(null)
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Gagal membuka alamat.')
       }
     },
-    [input, activeLabel, addTab]
+    [input, activeTab, addTab, getBounds]
   )
 
   const reload = useCallback(async () => {
-    if (!activeTab) return
+    if (!activeTab?.url) return
     try {
       await navigateBrowserTab(activeTab.label, activeTab.url)
     } catch (error) {
@@ -157,12 +188,13 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
       const fallback = next[Math.min(index, next.length - 1)]
 
       try {
-        await closeBrowserTab(tabs[index].label)
+        if (tabs[index].url) await closeBrowserTab(tabs[index].label)
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Gagal menutup tab.')
         return
       }
 
+      pendingTitles.current.delete(tabs[index].label)
       setTabs(next)
       if (activeId === id) setActiveId(fallback?.id ?? null)
     },
@@ -170,10 +202,42 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
   )
 
   useEffect(() => {
+    if (!isDesktop) return
+
+    let unlisten: (() => void) | undefined
+    void listen<BrowserTitlePayload>('browser-tab-title', ({ payload }) => {
+      const title = payload.title.trim() || 'Tab baru'
+      pendingTitles.current.set(payload.label, title)
+      setTabs((previous) => {
+        let changed = false
+        const next = previous.map((tab) => {
+          if (tab.label === payload.label && tab.title !== title) {
+            changed = true
+            return { ...tab, title }
+          }
+          return tab
+        })
+        return changed ? next : previous
+      })
+    })
+      .then((fn) => {
+        unlisten = fn
+      })
+      .catch(() => undefined)
+
+    return () => unlisten?.()
+  }, [])
+
+  useEffect(() => {
+    if (!isDesktop) return
+    void closeAllBrowserTabs().catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
     latestRef.current = {
       visible,
       activeLabel,
-      labels: tabs.map((tab) => tab.label),
+      labels: tabs.filter((tab) => tab.url).map((tab) => tab.label),
     }
     void sync()
   }, [visible, activeLabel, tabs, sidebarState, sync])
@@ -192,12 +256,6 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
       window.removeEventListener('resize', onResize)
     }
   }, [sync])
-
-  useEffect(() => {
-    if (!visible || !isDesktop || initialized.current) return
-    initialized.current = true
-    void addTab()
-  }, [visible, addTab])
 
   useEffect(() => {
     if (!visible) return
@@ -243,6 +301,7 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
   }, [visible, addTab, closeTab, activeId, tabs])
 
   const isUrl = normalizeBrowserUrl(input) !== null
+  const showNewTab = !activeTab?.url
 
   return (
     <div
@@ -270,7 +329,7 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
                   }
                 }}
                 className={cn(
-                  'group flex h-8 max-w-[42vw] min-w-0 shrink-0 items-center gap-2 rounded-t-md border border-b-0 px-2.5 text-xs transition-colors sm:max-w-52',
+                  'group flex h-8 max-w-[42vw] min-w-0 shrink-0 items-center gap-2 rounded-t-md border border-b-0 px-2.5 text-xs transition-colors',
                   tab.id === activeId
                     ? 'border-border bg-background text-foreground'
                     : 'border-transparent bg-muted/60 text-muted-foreground hover:bg-muted'
@@ -344,6 +403,7 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
               variant='ghost'
               size='icon'
               aria-label='Muat ulang'
+              disabled={!activeTab?.url}
               onClick={() => void reload()}
               className='size-8 shrink-0'
             >
@@ -351,10 +411,52 @@ export function BrowserWorkspace({ visible }: BrowserWorkspaceProps) {
             </Button>
           </div>
 
-          <div ref={viewportRef} className='min-h-0 flex-1 bg-white'>
-            {!isDesktop && (
-              <div className='flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground'>
-                Browser penuh hanya tersedia di aplikasi desktop.
+          <div ref={viewportRef} className='relative min-h-0 flex-1 bg-background'>
+            {showNewTab && (
+              <div className='flex h-full flex-col items-center justify-center gap-6 bg-background px-4 text-center text-foreground'>
+                <div className='space-y-1'>
+                  <div className='text-4xl font-semibold tracking-tight sm:text-5xl'>
+                    Open CLI
+                  </div>
+                  <p className='text-sm text-muted-foreground'>
+                    Cari di web atau ketik alamat untuk membuka halaman.
+                  </p>
+                </div>
+
+                <form
+                  className='flex w-full max-w-2xl items-center gap-2 rounded-full border bg-background px-4 py-2.5 shadow-sm focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40'
+                  onSubmit={(event) => void submit(event)}
+                >
+                  <Search className='size-4 shrink-0 text-muted-foreground' />
+                  <input
+                    value={input}
+                    onChange={(event) => {
+                      setDraft(event.target.value)
+                      setDraftForId(activeId)
+                    }}
+                    onFocus={(event) => event.currentTarget.select()}
+                    placeholder='Cari atau ketik URL'
+                    aria-label='Cari atau ketik URL pada tab baru'
+                    className='min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                  />
+                  <Button type='submit' size='sm' disabled={!input.trim()}>
+                    Buka
+                  </Button>
+                </form>
+
+                <div className='flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground'>
+                  <span>Tekan</span>
+                  <kbd className='rounded border bg-muted px-1.5 py-0.5 font-mono'>Ctrl</kbd>
+                  <span>+</span>
+                  <kbd className='rounded border bg-muted px-1.5 py-0.5 font-mono'>L</kbd>
+                  <span>untuk fokus alamat</span>
+                </div>
+
+                {!isDesktop && (
+                  <p className='text-xs text-muted-foreground'>
+                    Browser penuh hanya tersedia di aplikasi desktop.
+                  </p>
+                )}
               </div>
             )}
           </div>

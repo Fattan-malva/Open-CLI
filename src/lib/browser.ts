@@ -100,3 +100,8 @@ export async function closeBrowserTab(label: string): Promise<void> {
   if (!isDesktop) return
   await invoke('browser_tab_close', { label })
 }
+
+export async function closeAllBrowserTabs(): Promise<void> {
+  if (!isDesktop) return
+  await invoke('browser_tabs_close_all')
+}
