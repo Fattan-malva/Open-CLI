@@ -424,6 +424,13 @@ fn kill_all(state: &PtyState) {
 
 const BROWSER_WEBVIEW_LABEL: &str = "browser-view";
 
+fn browser_bounds(x: f64, y: f64, width: f64, height: f64) -> Rect {
+    Rect {
+        position: LogicalPosition::new(x, y).into(),
+        size: LogicalSize::new(width, height).into(),
+    }
+}
+
 #[tauri::command]
 async fn browser_open(
     app: AppHandle,
@@ -433,16 +440,15 @@ async fn browser_open(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    let bounds = Rect {
-        position: LogicalPosition::new(x, y).into(),
-        size: LogicalSize::new(width, height).into(),
-    };
-
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         if let Some(webview) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
             let target = tauri::Url::parse(&url).map_err(|error| error.to_string())?;
-            webview.set_bounds(bounds).map_err(|error| error.to_string())?;
+            webview
+                .set_bounds(browser_bounds(x, y, width, height))
+                .map_err(|error| error.to_string())?;
             webview.navigate(target).map_err(|error| error.to_string())?;
+            webview.show().map_err(|error| error.to_string())?;
+            webview.set_focus().map_err(|error| error.to_string())?;
             return Ok(());
         }
 
@@ -478,10 +484,7 @@ async fn browser_set_bounds(
 ) -> Result<(), String> {
     if let Some(webview) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
         webview
-            .set_bounds(Rect {
-                position: LogicalPosition::new(x, y).into(),
-                size: LogicalSize::new(width, height).into(),
-            })
+            .set_bounds(browser_bounds(x, y, width, height))
             .map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -490,6 +493,100 @@ async fn browser_set_bounds(
 #[tauri::command]
 async fn browser_close(app: AppHandle) -> Result<(), String> {
     if let Some(webview) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
+        webview.close().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn browser_tab_create(
+    app: AppHandle,
+    label: String,
+    url: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        if app.get_webview(&label).is_some() {
+            return Ok(());
+        }
+
+        let window = app
+            .get_window("main")
+            .ok_or_else(|| "jendela utama tidak ditemukan".to_string())?;
+        let target = tauri::Url::parse(&url).map_err(|error| error.to_string())?;
+
+        let webview = window
+            .add_child(
+                tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(target)),
+                LogicalPosition::new(x, y),
+                LogicalSize::new(width, height),
+            )
+            .map_err(|error| error.to_string())?;
+        webview.hide().map_err(|error| error.to_string())?;
+
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn browser_tab_navigate(app: AppHandle, label: String, url: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let webview = app
+            .get_webview(&label)
+            .ok_or_else(|| "tab browser tidak ditemukan".to_string())?;
+        let target = tauri::Url::parse(&url).map_err(|error| error.to_string())?;
+
+        webview.navigate(target).map_err(|error| error.to_string())?;
+        webview.show().map_err(|error| error.to_string())?;
+        webview.set_focus().map_err(|error| error.to_string())?;
+
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn browser_tab_sync(
+    app: AppHandle,
+    labels: Vec<String>,
+    active: Option<String>,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let bounds = move || browser_bounds(x, y, width, height);
+
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        for label in labels {
+            let Some(webview) = app.get_webview(&label) else {
+                continue;
+            };
+
+            if active.as_ref() == Some(&label) {
+                webview.set_bounds(bounds()).map_err(|error| error.to_string())?;
+                webview.show().map_err(|error| error.to_string())?;
+                webview.set_focus().map_err(|error| error.to_string())?;
+            } else {
+                webview.hide().map_err(|error| error.to_string())?;
+            }
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn browser_tab_close(app: AppHandle, label: String) -> Result<(), String> {
+    if let Some(webview) = app.get_webview(&label) {
         webview.close().map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -506,7 +603,11 @@ pub fn run() {
             pty_kill,
             browser_open,
             browser_set_bounds,
-            browser_close
+            browser_close,
+            browser_tab_create,
+            browser_tab_navigate,
+            browser_tab_sync,
+            browser_tab_close
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {

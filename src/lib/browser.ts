@@ -54,11 +54,7 @@ export async function openEmbeddedBrowser(
   url: string,
   bounds: BrowserBounds
 ): Promise<void> {
-  if (!isDesktop) {
-    window.open(url, '_blank', 'noopener,noreferrer')
-    return
-  }
-
+  if (!isDesktop) return
   await invoke('browser_open', { url, ...bounds })
 }
 
@@ -72,4 +68,35 @@ export async function setEmbeddedBrowserBounds(
 export async function closeEmbeddedBrowser(): Promise<void> {
   if (!isDesktop) return
   await invoke('browser_close')
+}
+
+export async function createBrowserTab(
+  label: string,
+  url: string,
+  bounds: BrowserBounds
+): Promise<void> {
+  if (!isDesktop) return
+  await invoke('browser_tab_create', { label, url, ...bounds })
+}
+
+export async function navigateBrowserTab(
+  label: string,
+  url: string
+): Promise<void> {
+  if (!isDesktop) return
+  await invoke('browser_tab_navigate', { label, url })
+}
+
+export async function syncBrowserTabs(
+  labels: string[],
+  active: string | null,
+  bounds: BrowserBounds
+): Promise<void> {
+  if (!isDesktop) return
+  await invoke('browser_tab_sync', { labels, active, ...bounds })
+}
+
+export async function closeBrowserTab(label: string): Promise<void> {
+  if (!isDesktop) return
+  await invoke('browser_tab_close', { label })
 }

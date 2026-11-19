@@ -38,7 +38,7 @@ export function Settings() {
     <>
       <AuthenticatedHeader />
 
-      <Main fixed>
+      <Main fixed fluid>
         <div className='space-y-0.5'>
           <h1 className='text-2xl font-bold tracking-tight md:text-3xl'>
             Settings
@@ -52,7 +52,7 @@ export function Settings() {
           <aside className='top-0 lg:sticky lg:w-1/5'>
             <SidebarNav items={sidebarNavItems} />
           </aside>
-          <div className='flex w-full overflow-y-hidden p-1'>
+          <div className='flex w-full overflow-y-hidden p-0'>
             <Outlet />
           </div>
         </div>

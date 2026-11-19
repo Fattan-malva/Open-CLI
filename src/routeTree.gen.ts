@@ -25,6 +25,8 @@ import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authentic
 import { Route as AuthenticatedTerminalIndexRouteImport } from './routes/_authenticated/terminal/index'
 import { Route as AuthenticatedTasksIndexRouteImport } from './routes/_authenticated/tasks/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
+import { Route as AuthenticatedBrowserIndexRouteImport } from './routes/_authenticated/browser/index'
 import { Route as AuthenticatedAboutIndexRouteImport } from './routes/_authenticated/about/index'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
@@ -114,6 +116,18 @@ const AuthenticatedSettingsIndexRoute =
     path: '/',
     getParentRoute: () => AuthenticatedSettingsRouteRoute,
   } as any)
+const AuthenticatedHelpCenterIndexRoute =
+  AuthenticatedHelpCenterIndexRouteImport.update({
+    id: '/help-center/',
+    path: '/help-center/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedBrowserIndexRoute =
+  AuthenticatedBrowserIndexRouteImport.update({
+    id: '/browser/',
+    path: '/browser/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAboutIndexRoute = AuthenticatedAboutIndexRouteImport.update({
   id: '/about/',
   path: '/about/',
@@ -168,6 +182,8 @@ export interface FileRoutesByFullPath {
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/about/': typeof AuthenticatedAboutIndexRoute
+  '/browser/': typeof AuthenticatedBrowserIndexRoute
+  '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/tasks/': typeof AuthenticatedTasksIndexRoute
   '/terminal/': typeof AuthenticatedTerminalIndexRoute
@@ -190,6 +206,8 @@ export interface FileRoutesByTo {
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/about': typeof AuthenticatedAboutIndexRoute
+  '/browser': typeof AuthenticatedBrowserIndexRoute
+  '/help-center': typeof AuthenticatedHelpCenterIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/tasks': typeof AuthenticatedTasksIndexRoute
   '/terminal': typeof AuthenticatedTerminalIndexRoute
@@ -215,6 +233,8 @@ export interface FileRoutesById {
   '/_authenticated/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/_authenticated/about/': typeof AuthenticatedAboutIndexRoute
+  '/_authenticated/browser/': typeof AuthenticatedBrowserIndexRoute
+  '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
   '/_authenticated/terminal/': typeof AuthenticatedTerminalIndexRoute
@@ -240,6 +260,8 @@ export interface FileRouteTypes {
     | '/settings/display'
     | '/settings/notifications'
     | '/about/'
+    | '/browser/'
+    | '/help-center/'
     | '/settings/'
     | '/tasks/'
     | '/terminal/'
@@ -262,6 +284,8 @@ export interface FileRouteTypes {
     | '/settings/display'
     | '/settings/notifications'
     | '/about'
+    | '/browser'
+    | '/help-center'
     | '/settings'
     | '/tasks'
     | '/terminal'
@@ -286,6 +310,8 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/display'
     | '/_authenticated/settings/notifications'
     | '/_authenticated/about/'
+    | '/_authenticated/browser/'
+    | '/_authenticated/help-center/'
     | '/_authenticated/settings/'
     | '/_authenticated/tasks/'
     | '/_authenticated/terminal/'
@@ -419,6 +445,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedSettingsRouteRoute
     }
+    '/_authenticated/help-center/': {
+      id: '/_authenticated/help-center/'
+      path: '/help-center'
+      fullPath: '/help-center/'
+      preLoaderRoute: typeof AuthenticatedHelpCenterIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/browser/': {
+      id: '/_authenticated/browser/'
+      path: '/browser'
+      fullPath: '/browser/'
+      preLoaderRoute: typeof AuthenticatedBrowserIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/about/': {
       id: '/_authenticated/about/'
       path: '/about'
@@ -492,6 +532,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedAboutIndexRoute: typeof AuthenticatedAboutIndexRoute
+  AuthenticatedBrowserIndexRoute: typeof AuthenticatedBrowserIndexRoute
+  AuthenticatedHelpCenterIndexRoute: typeof AuthenticatedHelpCenterIndexRoute
   AuthenticatedTasksIndexRoute: typeof AuthenticatedTasksIndexRoute
   AuthenticatedTerminalIndexRoute: typeof AuthenticatedTerminalIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
@@ -502,6 +544,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedAboutIndexRoute: AuthenticatedAboutIndexRoute,
+  AuthenticatedBrowserIndexRoute: AuthenticatedBrowserIndexRoute,
+  AuthenticatedHelpCenterIndexRoute: AuthenticatedHelpCenterIndexRoute,
   AuthenticatedTasksIndexRoute: AuthenticatedTasksIndexRoute,
   AuthenticatedTerminalIndexRoute: AuthenticatedTerminalIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,

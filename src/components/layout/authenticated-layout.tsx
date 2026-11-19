@@ -6,6 +6,7 @@ import { SearchProvider } from '@/context/search-provider'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { SkipToMain } from '@/components/skip-to-main'
+import { BrowserWorkspace } from '@/features/browser'
 import { TerminalWorkspace } from '@/features/terminal'
 
 type AuthenticatedLayoutProps = {
@@ -29,6 +30,7 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
             )}
           >
             {children ?? <Outlet />}
+            <BrowserWorkspace visible={pathname === '/browser'} />
             <TerminalWorkspace visible={pathname === '/terminal'} />
           </SidebarInset>
         </SidebarProvider>
