@@ -546,10 +546,11 @@ fn pty_idle_sessions(
 }
 
 #[tauri::command]
-fn pty_suspend(state: State<'_, PtyState>, id: String) -> Result<bool, String> {
+fn pty_suspend(app: AppHandle, state: State<'_, PtyState>, id: String) -> Result<bool, String> {
     let mut sessions = state.sessions.lock().unwrap();
     if let Some(mut session) = sessions.remove(&id) {
         terminate_tree(&mut session);
+        emit(&app, "pty:suspended", &id, String::new());
         return Ok(true);
     }
     Ok(false)
@@ -827,46 +828,20 @@ async fn browser_tab_sync(
     height: f64,
 ) -> Result<(), String> {
     let bounds = move || browser_bounds(x, y, width, height);
-    let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
-    let bridge_state = orchestrator::browser_bridge::BrowserBridgeState {
-        grants: bridge.grants.clone(),
-        stops: bridge.stops.clone(),
-        inspects: bridge.inspects.clone(),
-    };
-    let protected: HashSet<String> = bridge_state
-        .grants
-        .lock()
-        .map_err(|error| error.to_string())?
-        .values()
-        .map(|grant| grant.tab_label.clone())
-        .collect();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         for label in labels {
+            let Some(webview) = app.get_webview(&label) else {
+                continue;
+            };
             if active.as_ref() == Some(&label) {
-                let Some(webview) = app.get_webview(&label) else {
-                    continue;
-                };
                 webview
                     .set_bounds(bounds())
                     .map_err(|error| error.to_string())?;
                 webview.show().map_err(|error| error.to_string())?;
                 webview.set_focus().map_err(|error| error.to_string())?;
-                continue;
-            }
-
-            if protected.contains(&label) {
-                if let Some(webview) = app.get_webview(&label) {
-                    webview.hide().map_err(|error| error.to_string())?;
-                }
-                continue;
-            }
-
-            if app.get_webview(&label).is_some() {
-                orchestrator::browser_bridge::stop_for_tab(&bridge_state, &label)?;
-                if let Some(webview) = app.get_webview(&label) {
-                    webview.close().map_err(|error| error.to_string())?;
-                }
+            } else {
+                webview.hide().map_err(|error| error.to_string())?;
             }
         }
 

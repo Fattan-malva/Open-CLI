@@ -9,7 +9,6 @@ import { useSidebar } from '@/components/ui/sidebar'
 import { BrowserOrchestratorControls } from '@/features/orchestrator/components/browser-controls'
 import {
   BROWSER_DATA_CLEARED_EVENT,
-  closeAllBrowserTabs,
   closeBrowserTab,
   createBrowserTab,
   navigateBrowserTab,
@@ -63,6 +62,9 @@ export function BrowserWorkspace({
   const { state: sidebarState } = useSidebar()
   const [tabs, setTabs] = useState<BrowserTab[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const justDraggedRef = useRef(false)
+  const dragEndTimerRef = useRef<number | null>(null)
   const [draft, setDraft] = useState('')
   const [draftForId, setDraftForId] = useState<string | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -114,9 +116,6 @@ export function BrowserWorkspace({
       return
     }
 
-    if (latest.activeLabel && latest.activeUrl) {
-      await createBrowserTab(latest.activeLabel, latest.activeUrl, getBounds())
-    }
     await syncBrowserTabs(latest.labels, latest.activeLabel, getBounds())
   }, [getBounds])
 
@@ -219,6 +218,38 @@ export function BrowserWorkspace({
     [tabs, activeId]
   )
 
+  const finishDrag = useCallback(() => {
+    setDraggingId(null)
+    justDraggedRef.current = true
+    if (dragEndTimerRef.current !== null) {
+      window.clearTimeout(dragEndTimerRef.current)
+    }
+    dragEndTimerRef.current = window.setTimeout(() => {
+      justDraggedRef.current = false
+      dragEndTimerRef.current = null
+    }, 0)
+  }, [])
+
+  const reorderTabs = useCallback((fromId: string, toId: string) => {
+    setTabs((previous) => {
+      const from = previous.findIndex((tab) => tab.id === fromId)
+      const to = previous.findIndex((tab) => tab.id === toId)
+      if (from < 0 || to < 0 || from === to) return previous
+      const next = [...previous]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (dragEndTimerRef.current !== null) {
+        window.clearTimeout(dragEndTimerRef.current)
+      }
+    }
+  }, [])
+
   useEffect(() => {
     if (!isDesktop) return
 
@@ -245,11 +276,6 @@ export function BrowserWorkspace({
 
     return () => unlisten?.()
   }, [])
-
-  useEffect(() => {
-    if (!isDesktop || embedded) return
-    void closeAllBrowserTabs().catch(() => undefined)
-  }, [embedded])
 
   useEffect(() => {
     const reset = () => {
@@ -350,14 +376,33 @@ export function BrowserWorkspace({
 
       <Main fixed fluid className='min-h-0 flex-1 overflow-hidden p-0'>
         <div className='flex h-full min-h-0 flex-col'>
-          <div className='flex h-10 shrink-0 items-end gap-1 overflow-x-auto border-b bg-muted/40 px-2 pt-1 no-scrollbar'>
+          <div className='flex h-10 shrink-0 items-end gap-1 overflow-x-auto bg-muted/40 px-2 pt-1 no-scrollbar'>
             {tabs.map((tab) => (
               <div
                 key={tab.id}
                 role='tab'
                 aria-selected={tab.id === activeId}
                 tabIndex={0}
-                onClick={() => setActiveId(tab.id)}
+                draggable
+                onDragStart={(event) => {
+                  setDraggingId(tab.id)
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/plain', tab.id)
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  const fromId = draggingId ?? event.dataTransfer.getData('text/plain')
+                  if (fromId) reorderTabs(fromId, tab.id)
+                  finishDrag()
+                }}
+                onDragEnd={finishDrag}
+                onClick={() => {
+                  if (!justDraggedRef.current) setActiveId(tab.id)
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault()
@@ -365,16 +410,18 @@ export function BrowserWorkspace({
                   }
                 }}
                 className={cn(
-                  'group flex h-8 max-w-[42vw] min-w-0 shrink-0 items-center gap-2 rounded-t-md border border-b-0 px-2.5 text-xs transition-colors',
+                  'group flex h-8 max-w-[42vw] min-w-0 shrink-0 cursor-grab items-center gap-2 rounded-md px-2.5 text-xs transition-colors active:cursor-grabbing',
                   tab.id === activeId
-                    ? 'border-border bg-background text-foreground'
-                    : 'border-transparent bg-muted/60 text-muted-foreground hover:bg-muted'
+                    ? 'bg-background text-foreground'
+                    : 'bg-muted/60 text-muted-foreground hover:bg-muted',
+                  draggingId === tab.id && 'opacity-50'
                 )}
               >
                 <span className='min-w-0 flex-1 truncate'>{tab.title}</span>
                 <button
                   type='button'
                   aria-label='Tutup tab'
+                  onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation()
                     void closeTab(tab.id)
@@ -396,7 +443,7 @@ export function BrowserWorkspace({
             </button>
           </div>
 
-          <div className='flex h-12 shrink-0 items-center gap-2 border-b bg-background px-2 sm:px-3'>
+          <div className='flex h-12 shrink-0 items-center gap-2 bg-background px-2 sm:px-3'>
             <form
               className='flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border border-transparent bg-muted px-3 transition-colors focus-within:border-ring focus-within:bg-background focus-within:ring-2 focus-within:ring-ring/40'
               onSubmit={(event) => void submit(event)}

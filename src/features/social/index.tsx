@@ -55,17 +55,12 @@ export function SocialWorkspace({ site }: SocialWorkspaceProps) {
   }, [])
 
   const sync = useCallback(() => {
-    if (!isDesktop || !config || !label) return
-    const active = isWebviewOverlayOpen() ? null : visible ? label : null
-    const labels = createdLabels.current.has(label) ? [label] : []
+    if (!isDesktop) return
+    const labels = Array.from(createdLabels.current)
     if (labels.length === 0) return
-    if (active) {
-      void createBrowserTab(label, config.url, getBounds())
-        .then(() => syncBrowserTabs(labels, active, getBounds()))
-        .catch(() => undefined)
-      return
-    }
-    void syncBrowserTabs(labels, null, getBounds()).catch(() => undefined)
+    const active =
+      config && label && visible && !isWebviewOverlayOpen() ? label : null
+    void syncBrowserTabs(labels, active, getBounds()).catch(() => undefined)
   }, [visible, label, config, getBounds])
 
   useEffect(() => {

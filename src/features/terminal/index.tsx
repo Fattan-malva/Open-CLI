@@ -471,15 +471,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   }, [])
 
   const newTab = useCallback((command?: string, title?: string, agentId?: string) => {
-    if (agentId) {
-      const existing = useTerminalStore
-        .getState()
-        .tabs.find((tab) => tab.agentId === agentId)
-      if (existing) {
-        setActive(existing.id)
-        return
-      }
-    }
     const resolvedTitle =
       agentId && title
         ? nextAgentTitle(useTerminalStore.getState().tabs, title, agentId)

@@ -62,7 +62,7 @@ export function BrowserOrchestratorControls({
   }
 
   return (
-    <div className='flex shrink-0 items-center gap-1 border-l pl-2'>
+    <div className='flex shrink-0 items-center gap-1'>
       <select
         aria-label='Agent untuk browser'
         value={selected}

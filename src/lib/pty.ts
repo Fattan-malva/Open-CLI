@@ -8,6 +8,7 @@ type Handler<T> = (value: T) => void
 
 const dataHandlers = new Map<string, Set<Handler<Uint8Array>>>()
 const exitHandlers = new Map<string, Set<Handler<void>>>()
+const suspendHandlers = new Map<string, Set<Handler<void>>>()
 const pendingData = new Map<string, Uint8Array[]>()
 let listenersReady: Promise<void> | null = null
 let dataFrame = 0
@@ -52,6 +53,9 @@ async function ensureListeners() {
     listen<PtyEvent>('pty:exit', ({ payload }) => {
       exitHandlers.get(payload.id)?.forEach((handler) => handler())
     }),
+    listen<PtyEvent>('pty:suspended', ({ payload }) => {
+      suspendHandlers.get(payload.id)?.forEach((handler) => handler())
+    }),
   ]).then(() => undefined)
 
   return listenersReady
@@ -75,6 +79,11 @@ export async function onPtyData(id: string, handler: Handler<Uint8Array>) {
 export async function onPtyExit(id: string, handler: Handler<void>) {
   await ensureListeners()
   return register(exitHandlers, id, handler)
+}
+
+export async function onPtySuspended(id: string, handler: Handler<void>) {
+  await ensureListeners()
+  return register(suspendHandlers, id, handler)
 }
 
 export function ptySpawn(

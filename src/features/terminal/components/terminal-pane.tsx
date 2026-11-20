@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { Copy, Crosshair, Pencil, X } from 'lucide-react'
@@ -7,6 +7,7 @@ import { isDesktop } from '@/lib/platform'
 import {
   onPtyData,
   onPtyExit,
+  onPtySuspended,
   ptyEnsure,
   ptyResize,
   ptySetActive,
@@ -63,10 +64,35 @@ export function TerminalPane({
   const inputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const commandTimerRef = useRef<number | null>(null)
+  const commandSentRef = useRef(false)
   const [exited, setExited] = useState(false)
+  const [sessionReady, setSessionReady] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(tab.title)
   const [menuOpen, setMenuOpen] = useState(false)
+
+  const ensureSession = useCallback(async () => {
+    if (!isDesktop) return
+    try {
+      const started = await ptyEnsure(
+        tab.id,
+        termRef.current?.cols ?? 80,
+        termRef.current?.rows ?? 24,
+        tab.shell,
+        tab.cwd
+      )
+      if (started && tab.command && !commandSentRef.current) {
+        commandSentRef.current = true
+        commandTimerRef.current = window.setTimeout(() => {
+          void ptyWrite(tab.id, `${tab.command}\r`).catch(() => undefined)
+        }, 350)
+      }
+    } catch {
+      if (visibleRef.current) {
+        termRef.current?.writeln('Gagal memulai shell. Periksa pengaturan shell.')
+      }
+    }
+  }, [tab.id, tab.shell, tab.cwd, tab.command])
 
   useEffect(() => {
     visibleRef.current = visible
@@ -82,34 +108,11 @@ export function TerminalPane({
   }, [visible])
 
   useEffect(() => {
-    if (!isDesktop) return
-    void ptySetActive(tab.id, active && visible).catch(() => undefined)
-    if (!active || !visible) return
-
-    let cancelled = false
-    void ptyEnsure(
-      tab.id,
-      termRef.current?.cols ?? 80,
-      termRef.current?.rows ?? 24,
-      tab.shell,
-      tab.cwd
-    )
-      .then((started) => {
-        if (cancelled || !started || !tab.command) return
-        commandTimerRef.current = window.setTimeout(() => {
-          if (!cancelled) void ptyWrite(tab.id, `${tab.command}\r`).catch(() => undefined)
-        }, 350)
-      })
-      .catch(() => undefined)
-
-    return () => {
-      cancelled = true
-      if (commandTimerRef.current !== null) {
-        window.clearTimeout(commandTimerRef.current)
-        commandTimerRef.current = null
-      }
-    }
-  }, [active, visible, tab.id, tab.shell, tab.cwd, tab.command])
+    if (!isDesktop || !sessionReady) return
+    void ensureSession().finally(() => {
+      void ptySetActive(tab.id, active && visible).catch(() => undefined)
+    })
+  }, [active, visible, sessionReady, ensureSession, tab.id])
 
   useEffect(() => {
     if (!editing) return
@@ -176,6 +179,7 @@ export function TerminalPane({
     observer.observe(mount)
 
     const setup = async () => {
+      setSessionReady(false)
       if (!isDesktop) {
         term.writeln('\x1b[38;2;160;160;160mTerminal real hanya tersedia di aplikasi desktop.')
         term.writeln('Jalankan: pnpm desktop:dev\x1b[0m')
@@ -183,20 +187,29 @@ export function TerminalPane({
         return
       }
 
-      const [offData, offExit] = await Promise.all([
+      const [offData, offExit, offSuspended] = await Promise.all([
         onPtyData(tab.id, (data) => {
-          if (!disposed) term.write(data)
+          if (!disposed) {
+            setExited(false)
+            term.write(data)
+          }
         }),
         onPtyExit(tab.id, () => {
+          commandSentRef.current = false
           if (!disposed) setExited(true)
+        }),
+        onPtySuspended(tab.id, () => {
+          commandSentRef.current = false
         }),
       ])
       if (disposed) {
         offData()
         offExit()
+        offSuspended()
         return
       }
-      cleanups.push(offData, offExit)
+      cleanups.push(offData, offExit, offSuspended)
+      setSessionReady(true)
 
       term.onData((data) => {
         void ptyWrite(tab.id, data).catch(() => undefined)
@@ -207,6 +220,8 @@ export function TerminalPane({
       term.onResize(({ cols, rows }) => {
         void ptyResize(tab.id, cols, rows).catch(() => undefined)
       })
+
+      await ensureSession()
 
       try {
         resize()
@@ -219,14 +234,13 @@ export function TerminalPane({
 
     return () => {
       disposed = true
-      if (commandTimerRef.current !== null) window.clearTimeout(commandTimerRef.current)
       observer.disconnect()
       cleanups.forEach((cleanup) => void cleanup())
       term.dispose()
       termRef.current = null
       fitRef.current = null
     }
-  }, [tab.id, tab.shell, tab.cwd, tab.command])
+  }, [tab.id, tab.shell, tab.cwd, tab.command, ensureSession])
 
   useEffect(() => {
     if (active && visibleRef.current) termRef.current?.focus()
