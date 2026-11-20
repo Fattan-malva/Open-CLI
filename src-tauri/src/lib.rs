@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 
+mod orchestrator;
+
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -168,8 +170,22 @@ struct Session {
 }
 
 #[derive(Default)]
-struct PtyState {
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+pub(crate) struct PtyState {
+    pub(crate) sessions: Arc<Mutex<HashMap<String, Session>>>,
+}
+
+pub(crate) fn pty_write_session(
+    state: &PtyState,
+    id: &str,
+    data: &str,
+) -> Result<(), String> {
+    let mut sessions = state.sessions.lock().unwrap();
+    let session = sessions.get_mut(id).ok_or("session not found")?;
+    session
+        .writer
+        .write_all(data.as_bytes())
+        .and_then(|_| session.writer.flush())
+        .map_err(|error| error.to_string())
 }
 
 fn emit(app: &AppHandle, event: &str, id: &str, data: String) {
@@ -367,13 +383,7 @@ fn pty_spawn(
 
 #[tauri::command]
 fn pty_write(state: State<'_, PtyState>, id: String, data: String) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().unwrap();
-    let session = sessions.get_mut(&id).ok_or("session not found")?;
-    session
-        .writer
-        .write_all(data.as_bytes())
-        .and_then(|_| session.writer.flush())
-        .map_err(|e| e.to_string())
+    pty_write_session(&state, &id, &data)
 }
 
 #[tauri::command]
@@ -1001,12 +1011,38 @@ pub fn run() {
             browser_session_only_set,
             app_uninstall,
             fs_list_drives,
-            fs_list_folders
+            fs_list_folders,
+            orchestrator::commands::orchestrator_snapshot,
+            orchestrator::commands::orchestrator_upsert_run,
+            orchestrator::commands::orchestrator_upsert_task,
+            orchestrator::commands::orchestrator_upsert_approval,
+            orchestrator::commands::orchestrator_emit_event,
+            orchestrator::commands::orchestrator_next_event_id,
+            orchestrator::commands::orchestrator_register_agent,
+            orchestrator::commands::orchestrator_unregister_agent,
+            orchestrator::commands::orchestrator_run_dir,
+            orchestrator::commands::orchestrator_artifact_write,
+            orchestrator::commands::orchestrator_artifact_read,
+            orchestrator::commands::orchestrator_artifact_wait,
+            orchestrator::commands::orchestrator_workspace_create,
+            orchestrator::commands::orchestrator_workspace_status,
+            orchestrator::commands::orchestrator_workspace_diff,
+            orchestrator::commands::orchestrator_send_prompt,
+            orchestrator::commands::orchestrator_dispatch,
+            orchestrator::commands::orchestrator_run_command,
+            orchestrator::commands::orchestrator_integrate,
+            orchestrator::commands::orchestrator_recover,
+            orchestrator::commands::orchestrator_browser_bridge_start,
+            orchestrator::commands::orchestrator_browser_bridge_stop,
+            orchestrator::commands::orchestrator_browser_call,
+            orchestrator::commands::orchestrator_browser_inspect,
+            orchestrator::commands::orchestrator_browser_snapshot
         ])
         .setup(|app| {
             if let Err(error) = ensure_agent_cli_file(app.handle()) {
                 eprintln!("Gagal menyiapkan data/cli-agent.json: {}", error);
             }
+            orchestrator::init(app.handle());
             if read_browser_privacy(app.handle()).session_only {
                 if let Err(error) = clear_browsing_data(app.handle()) {
                     eprintln!("Gagal membersihkan data browser: {}", error);

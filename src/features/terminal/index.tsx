@@ -56,6 +56,9 @@ import {
 import { builtInAgents, type AgentCliItem } from '@/features/agent-cli/data/agents'
 import { ShortcutKeys } from '@/features/agent-cli/components/shortcut-keys'
 import { BrowserWorkspace } from '@/features/browser'
+import { OrchestratorModeSwitch } from '@/features/orchestrator/components/mode-switch'
+import { OrchestratorDock } from '@/features/orchestrator/components/orchestrator-dock'
+import { useOrchestratorStore } from '@/features/orchestrator/store'
 import { ProjectPickerDialog } from './components/project-picker-dialog'
 import { TerminalPane } from './components/terminal-pane'
 import { useTerminalStore } from './store'
@@ -261,6 +264,9 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   const browserTerminalPaneRef = useRef<HTMLDivElement>(null)
   const animationTimer = useRef<number | null>(null)
   const browserAxis = browserStacked ? 'y' : 'x'
+  const orchestratorMode = useOrchestratorStore((state) => state.mode)
+  const hydrateOrchestrator = useOrchestratorStore((state) => state.hydrate)
+  const syncAgents = useOrchestratorStore((state) => state.syncAgents)
 
   const terminalCompact = browserOpen ? browserCompact : compact
   const layout = useMemo(
@@ -381,11 +387,24 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     }
   }, [visible])
 
-  const newTab = useCallback((command?: string, title?: string) => {
+  useEffect(() => {
+    void hydrateOrchestrator()
+  }, [hydrateOrchestrator])
+
+  useEffect(() => {
+    if (!isDesktop) return
+    void syncAgents(tabs, [
+      ...builtInAgents,
+      ...(agentStore?.customAgents ?? []),
+    ])
+  }, [tabs, agentStore, syncAgents])
+
+  const newTab = useCallback((command?: string, title?: string, agentId?: string) => {
     const id = add(shell, {
       title,
       cwd: agentStore?.projectPath ?? undefined,
       command,
+      agentId,
     })
     setAnimatedId(id)
     if (animationTimer.current !== null) window.clearTimeout(animationTimer.current)
@@ -395,7 +414,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   }, [add, agentStore?.projectPath, shell])
 
   const addLauncher = useCallback(() => {
-    newTab(selectedAgent?.command, selectedAgent?.name)
+    newTab(selectedAgent?.command, selectedAgent?.name, selectedAgent?.id)
   }, [newTab, selectedAgent])
 
   const selectProject = useCallback(
@@ -419,7 +438,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
 
   const launchAgent = useCallback(
     (agent: AgentCliItem) => {
-      newTab(agent.command, agent.name)
+      newTab(agent.command, agent.name, agent.id)
     },
     [newTab]
   )
@@ -972,6 +991,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
             </div>
 
             <div className='flex shrink-0 items-center gap-2'>
+              <OrchestratorModeSwitch />
               <TooltipProvider delayDuration={200}>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1074,6 +1094,12 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
           )}
         </div>
       </Main>
+
+      {visible && orchestratorMode === 'orchestrator' && (
+        <div className='fixed bottom-4 right-4 top-20 z-40 w-[min(420px,calc(100vw-2rem))]'>
+          <OrchestratorDock />
+        </div>
+      )}
 
       <ProjectPickerDialog
         open={pickerOpen}

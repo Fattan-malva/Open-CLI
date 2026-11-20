@@ -80,7 +80,6 @@ export const sidebarData: SidebarData = {
           title: 'Orchestration',
           url: '/agent-chat',
           icon: MessageSquare,
-          badge: 'Soon',
         },
         {
           title: 'Custom Provider',

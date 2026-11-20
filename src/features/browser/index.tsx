@@ -6,6 +6,7 @@ import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
 import { Button } from '@/components/ui/button'
 import { useSidebar } from '@/components/ui/sidebar'
+import { BrowserOrchestratorControls } from '@/features/orchestrator/components/browser-controls'
 import {
   BROWSER_DATA_CLEARED_EVENT,
   closeAllBrowserTabs,
@@ -439,6 +440,11 @@ export function BrowserWorkspace({
             >
               <RotateCw className='size-4' />
             </Button>
+
+            <BrowserOrchestratorControls
+              tabLabel={activeTab?.label ?? null}
+              disabled={!activeTab?.url}
+            />
           </div>
 
           <div ref={viewportRef} className='relative min-h-0 flex-1 bg-background'>

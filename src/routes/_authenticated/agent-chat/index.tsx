@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { ComingSoon } from '@/components/coming-soon'
+import { OrchestratorLanding } from '@/features/orchestrator/components/landing'
 
 export const Route = createFileRoute('/_authenticated/agent-chat/')({
-  component: ComingSoon,
+  component: OrchestratorLanding,
 })

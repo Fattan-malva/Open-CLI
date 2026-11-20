@@ -7,6 +7,7 @@ export type TerminalTab = {
   shell: string
   cwd?: string
   command?: string
+  agentId?: string
 }
 
 type TerminalState = {
@@ -15,7 +16,7 @@ type TerminalState = {
   nextIndex: number
   add: (
     shell?: string,
-    options?: { title?: string; cwd?: string; command?: string }
+    options?: { title?: string; cwd?: string; command?: string; agentId?: string }
   ) => string
   close: (id: string) => void
   rename: (id: string, title: string) => void
@@ -37,6 +38,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       shell,
       cwd: options.cwd,
       command: options.command,
+      agentId: options.agentId,
     }
     set((state) => ({
       tabs: [...state.tabs, tab],
