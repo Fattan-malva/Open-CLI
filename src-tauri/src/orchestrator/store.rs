@@ -100,10 +100,7 @@ impl OrchestratorStore {
                 .get("sequence")
                 .and_then(Value::as_i64)
                 .ok_or_else(|| "event missing sequence".to_string())?;
-            let task_id = data
-                .get("taskId")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let task_id = data.get("taskId").and_then(Value::as_str).unwrap_or("");
             conn.execute(
                 "INSERT INTO events(seq, run_id, task_id, state, data, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -140,7 +137,9 @@ impl OrchestratorStore {
             .map_err(|error| error.to_string())?;
         for row in rows {
             let raw = row.map_err(|error| error.to_string())?;
-            return serde_json::from_str(&raw).map(Some).map_err(|error| error.to_string());
+            return serde_json::from_str(&raw)
+                .map(Some)
+                .map_err(|error| error.to_string());
         }
         Ok(None)
     }
@@ -161,11 +160,9 @@ impl OrchestratorStore {
     pub fn next_sequence(&self, _run_id: &str) -> Result<i64, String> {
         let conn = self.conn.lock().map_err(|error| error.to_string())?;
         let value: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(seq), 0) + 1 FROM events",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COALESCE(MAX(seq), 0) + 1 FROM events", [], |row| {
+                row.get(0)
+            })
             .map_err(|error| error.to_string())?;
         Ok(value)
     }
@@ -178,7 +175,7 @@ impl OrchestratorStore {
         let conn = self.conn.lock().map_err(|error| error.to_string())?;
         for table in TABLES {
             let sql = if table == "events" {
-                "SELECT data FROM events ORDER BY seq ASC".to_string()
+                "SELECT data FROM (SELECT data, seq FROM events ORDER BY seq DESC LIMIT 500) ORDER BY seq ASC".to_string()
             } else {
                 format!("SELECT data FROM {table} ORDER BY created_at ASC")
             };
@@ -189,8 +186,7 @@ impl OrchestratorStore {
             let mut values = Vec::new();
             for row in rows {
                 let raw = row.map_err(|error| error.to_string())?;
-                let value: Value =
-                    serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+                let value: Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
                 values.push(value);
             }
             if let Some(array) = result.get_mut(table).and_then(Value::as_array_mut) {
@@ -208,7 +204,9 @@ impl OrchestratorStore {
                 .prepare("SELECT id, data FROM tasks")
                 .map_err(|error| error.to_string())?;
             let rows = statement
-                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
                 .map_err(|error| error.to_string())?;
             for row in rows {
                 let (id, raw) = row.map_err(|error| error.to_string())?;
@@ -223,7 +221,14 @@ impl OrchestratorStore {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            if !["running", "assigned", "validating", "waiting", "needs_input"].contains(&status.as_str())
+            if ![
+                "running",
+                "assigned",
+                "validating",
+                "waiting",
+                "needs_input",
+            ]
+            .contains(&status.as_str())
             {
                 continue;
             }

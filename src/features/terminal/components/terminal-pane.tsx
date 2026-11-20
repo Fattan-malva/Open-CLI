@@ -7,8 +7,9 @@ import { isDesktop } from '@/lib/platform'
 import {
   onPtyData,
   onPtyExit,
+  ptyEnsure,
   ptyResize,
-  ptySpawn,
+  ptySetActive,
   ptyWrite,
 } from '@/lib/pty'
 import type { TerminalTab } from '../store'
@@ -61,6 +62,7 @@ export function TerminalPane({
   const visibleRef = useRef(visible)
   const inputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const commandTimerRef = useRef<number | null>(null)
   const [exited, setExited] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(tab.title)
@@ -78,6 +80,36 @@ export function TerminalPane({
     })
     return () => cancelAnimationFrame(frame)
   }, [visible])
+
+  useEffect(() => {
+    if (!isDesktop) return
+    void ptySetActive(tab.id, active && visible).catch(() => undefined)
+    if (!active || !visible) return
+
+    let cancelled = false
+    void ptyEnsure(
+      tab.id,
+      termRef.current?.cols ?? 80,
+      termRef.current?.rows ?? 24,
+      tab.shell,
+      tab.cwd
+    )
+      .then((started) => {
+        if (cancelled || !started || !tab.command) return
+        commandTimerRef.current = window.setTimeout(() => {
+          if (!cancelled) void ptyWrite(tab.id, `${tab.command}\r`).catch(() => undefined)
+        }, 350)
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+      if (commandTimerRef.current !== null) {
+        window.clearTimeout(commandTimerRef.current)
+        commandTimerRef.current = null
+      }
+    }
+  }, [active, visible, tab.id, tab.shell, tab.cwd, tab.command])
 
   useEffect(() => {
     if (!editing) return
@@ -118,7 +150,7 @@ export function TerminalPane({
       fontSize: 12,
       lineHeight: 1.3,
       letterSpacing: 0.2,
-      scrollback: 10000,
+      scrollback: 2500,
       theme,
       convertEol: true,
     })
@@ -129,7 +161,6 @@ export function TerminalPane({
     fitRef.current = fit
 
     let disposed = false
-    let commandTimer: number | null = null
     const cleanups: (() => void | Promise<void>)[] = []
 
     const resize = () => {
@@ -179,12 +210,6 @@ export function TerminalPane({
 
       try {
         resize()
-        await ptySpawn(tab.id, term.cols, term.rows, tab.shell, tab.cwd)
-        if (tab.command && isDesktop) {
-          commandTimer = window.setTimeout(() => {
-            if (!disposed) void ptyWrite(tab.id, `${tab.command}\r`).catch(() => undefined)
-          }, 350)
-        }
       } catch {
         if (!disposed) term.writeln('Gagal memulai shell. Periksa pengaturan shell.')
       }
@@ -194,7 +219,7 @@ export function TerminalPane({
 
     return () => {
       disposed = true
-      if (commandTimer !== null) window.clearTimeout(commandTimer)
+      if (commandTimerRef.current !== null) window.clearTimeout(commandTimerRef.current)
       observer.disconnect()
       cleanups.forEach((cleanup) => void cleanup())
       term.dispose()

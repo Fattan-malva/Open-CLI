@@ -66,7 +66,10 @@ fn eval_json(webview: &Webview, expression: &str) -> Result<Value, String> {
 }
 
 fn arg_string(args: &Value, key: &str) -> String {
-    args.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn arg_number(args: &Value, key: &str, default: f64) -> f64 {
@@ -124,7 +127,10 @@ fn scroll_op(app: &AppHandle, tab_label: &str, args: &Value) -> Result<Value, St
         .ok_or_else(|| format!("browser tab {} not found", tab_label))?;
     let x = arg_number(args, "x", 0.0);
     let y = arg_number(args, "y", 600.0);
-    let expression = format!("(() => {{ window.scrollBy({}, {}); return {{ok:true}}; }})()", x, y);
+    let expression = format!(
+        "(() => {{ window.scrollBy({}, {}); return {{ok:true}}; }})()",
+        x, y
+    );
     eval_json(&webview, &expression)
 }
 
@@ -266,7 +272,9 @@ pub fn call(
             let webview = app
                 .get_webview(tab_label)
                 .ok_or_else(|| format!("browser tab {} not found", tab_label))?;
-            webview.navigate(parsed).map_err(|error| error.to_string())?;
+            webview
+                .navigate(parsed)
+                .map_err(|error| error.to_string())?;
             json!({ "ok": true })
         }
         "read" => read_op(app, tab_label, args)?,
@@ -298,7 +306,10 @@ pub fn start(
     }
     let token = random_token();
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
-    let port = listener.local_addr().map_err(|error| error.to_string())?.port();
+    let port = listener
+        .local_addr()
+        .map_err(|error| error.to_string())?
+        .port();
     let grant = BridgeGrant {
         token: token.clone(),
         tab_label: tab_label.to_string(),
@@ -427,10 +438,7 @@ fn handle_request(
     }
 }
 
-pub fn stop(
-    state: &BrowserBridgeState,
-    token: &str,
-) -> Result<(), String> {
+pub fn stop(state: &BrowserBridgeState, token: &str) -> Result<(), String> {
     if let Ok(stops) = state.stops.lock() {
         if let Some(flag) = stops.get(token) {
             flag.store(true, Ordering::Relaxed);
@@ -444,6 +452,21 @@ pub fn stop(
     let mut grants = state.grants.lock().map_err(|error| error.to_string())?;
     grants.remove(token);
     Ok(())
+}
+
+pub fn stop_for_tab(state: &BrowserBridgeState, tab_label: &str) -> Result<usize, String> {
+    let tokens: Vec<String> = state
+        .grants
+        .lock()
+        .map_err(|error| error.to_string())?
+        .values()
+        .filter(|grant| grant.tab_label == tab_label)
+        .map(|grant| grant.token.clone())
+        .collect();
+    for token in &tokens {
+        stop(state, token)?;
+    }
+    Ok(tokens.len())
 }
 
 pub fn inspect(

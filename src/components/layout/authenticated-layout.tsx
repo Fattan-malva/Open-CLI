@@ -11,6 +11,7 @@ import { BrainstormingWorkspace } from '@/features/brainstorming'
 import { BrowserWorkspace } from '@/features/browser'
 import { SocialWorkspace } from '@/features/social'
 import { TerminalWorkspace } from '@/features/terminal'
+import { detachOrchestratorListeners } from '@/features/orchestrator/store'
 import { watchWebviewOverlays } from '@/lib/webview-overlay'
 
 type AuthenticatedLayoutProps = {
@@ -25,6 +26,8 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
     : null
 
   useEffect(() => watchWebviewOverlays(), [])
+
+  useEffect(() => () => detachOrchestratorListeners(), [])
 
   return (
     <SearchProvider>

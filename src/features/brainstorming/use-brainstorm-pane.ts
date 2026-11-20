@@ -83,10 +83,16 @@ export function useBrainstormPane({
   }, [label, url, getBounds])
 
   const sync = useCallback(() => {
-    if (!isDesktop || !created.current) return
+    if (!isDesktop || !created.current || !url) return
     const active = enabled && !isWebviewOverlayOpen() ? label : null
-    void syncBrowserTabs([label], active, getBounds()).catch(() => undefined)
-  }, [enabled, label, getBounds])
+    if (active) {
+      void createBrowserTab(label, url, getBounds())
+        .then(() => syncBrowserTabs([label], active, getBounds()))
+        .catch(() => undefined)
+      return
+    }
+    void syncBrowserTabs([label], null, getBounds()).catch(() => undefined)
+  }, [enabled, label, url, getBounds])
 
   useEffect(() => {
     window.addEventListener(WEBVIEW_OVERLAY_EVENT, sync)

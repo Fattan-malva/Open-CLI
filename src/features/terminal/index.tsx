@@ -47,7 +47,13 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { isDesktop } from '@/lib/platform'
-import { ptyIsBusy, ptyKill } from '@/lib/pty'
+import {
+  ptyIdleSessions,
+  ptyIsBusy,
+  ptyKill,
+  ptySuspend,
+  systemMemoryAvailablePercent,
+} from '@/lib/pty'
 import {
   loadAgentCliStore,
   saveAgentCliStore,
@@ -58,7 +64,11 @@ import { ShortcutKeys } from '@/features/agent-cli/components/shortcut-keys'
 import { BrowserWorkspace } from '@/features/browser'
 import { OrchestratorModeSwitch } from '@/features/orchestrator/components/mode-switch'
 import { OrchestratorDock } from '@/features/orchestrator/components/orchestrator-dock'
-import { useOrchestratorStore } from '@/features/orchestrator/store'
+import {
+  ACTIVE_TASK_STATUSES,
+  useOrchestratorStore,
+} from '@/features/orchestrator/store'
+import { shouldSuspendSession } from './governor'
 import { ProjectPickerDialog } from './components/project-picker-dialog'
 import { TerminalPane } from './components/terminal-pane'
 import { useTerminalStore } from './store'
@@ -411,7 +421,65 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     ])
   }, [tabs, agentStore, syncAgents])
 
+  useEffect(() => {
+    if (!isDesktop) return
+    let cancelled = false
+    const run = async () => {
+      try {
+        const available = await systemMemoryAvailablePercent()
+        const idleAfterMs = available < 20 ? 60_000 : 10 * 60_000
+        const idle = await ptyIdleSessions(idleAfterMs)
+        if (cancelled || idle.length === 0) return
+        const orchestrator = useOrchestratorStore.getState()
+        const activeOwners = new Set(
+          orchestrator.snapshot.tasks
+            .filter(
+              (task) =>
+                ACTIVE_TASK_STATUSES.has(task.status) && task.ownerSessionId
+            )
+            .map((task) => task.ownerSessionId as string)
+        )
+        const grantedAgents = new Set(orchestrator.grants.map((grant) => grant.agentId))
+        const currentTabs = useTerminalStore.getState().tabs
+        for (const id of idle) {
+          if (cancelled) return
+          const busy = await ptyIsBusy(id).catch(() => true)
+          if (
+            !shouldSuspendSession({
+              id,
+              activeId: useTerminalStore.getState().activeId,
+              hasTab: currentTabs.some((tab) => tab.id === id),
+              hasActiveTask: activeOwners.has(id),
+              hasBridgeGrant: grantedAgents.has(id),
+              busy,
+            })
+          ) {
+            continue
+          }
+          await ptySuspend(id).catch(() => false)
+        }
+      } catch {
+        return
+      }
+    }
+    const timer = window.setInterval(() => void run(), 5_000)
+    void run()
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
   const newTab = useCallback((command?: string, title?: string, agentId?: string) => {
+    if (agentId) {
+      const existing = useTerminalStore
+        .getState()
+        .tabs.find((tab) => tab.agentId === agentId)
+      if (existing) {
+        setActive(existing.id)
+        return
+      }
+    }
     const resolvedTitle =
       agentId && title
         ? nextAgentTitle(useTerminalStore.getState().tabs, title, agentId)
@@ -422,12 +490,13 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
       command,
       agentId,
     })
+    setActive(id)
     setAnimatedId(id)
     if (animationTimer.current !== null) window.clearTimeout(animationTimer.current)
     animationTimer.current = window.setTimeout(() => {
       setAnimatedId((current) => (current === id ? null : current))
     }, 320)
-  }, [add, agentStore?.projectPath, shell])
+  }, [add, agentStore?.projectPath, setActive, shell])
 
   const addLauncher = useCallback(() => {
     newTab(selectedAgent?.command, selectedAgent?.name, selectedAgent?.id)

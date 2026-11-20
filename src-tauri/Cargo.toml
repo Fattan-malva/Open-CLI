@@ -24,6 +24,7 @@ winapi = { version = "0.3", features = [
   "jobapi2",
   "minwindef",
   "ntdef",
+  "sysinfoapi",
   "tlhelp32",
   "winbase",
   "winnt",

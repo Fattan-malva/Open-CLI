@@ -71,6 +71,7 @@ export function BrowserWorkspace({
   const latestRef = useRef({
     visible,
     activeLabel: null as string | null,
+    activeUrl: null as string | null,
     labels: [] as string[],
   })
 
@@ -113,6 +114,9 @@ export function BrowserWorkspace({
       return
     }
 
+    if (latest.activeLabel && latest.activeUrl) {
+      await createBrowserTab(latest.activeLabel, latest.activeUrl, getBounds())
+    }
     await syncBrowserTabs(latest.labels, latest.activeLabel, getBounds())
   }, [getBounds])
 
@@ -261,10 +265,11 @@ export function BrowserWorkspace({
     latestRef.current = {
       visible,
       activeLabel,
+      activeUrl: activeTab?.url ?? null,
       labels: tabs.filter((tab) => tab.url).map((tab) => tab.label),
     }
     void sync()
-  }, [visible, activeLabel, tabs, sidebarState, sync])
+  }, [visible, activeLabel, activeTab, tabs, sidebarState, sync])
 
   useEffect(() => {
     const resync = () => void sync()

@@ -72,26 +72,20 @@ fn emit_event(app: &AppHandle, store: &OrchestratorStore, event: &Value) -> Resu
         .unwrap_or("")
         .to_string();
     let event_type = string_field(event, "type")?;
-    let stored = store.upsert(
-        "events",
-        &sequence.to_string(),
-        &run_id,
-        &event_type,
-        event,
-    )?;
+    let stored = store.upsert("events", &sequence.to_string(), &run_id, &event_type, event)?;
     app.emit("orchestrator:event", stored.clone())
         .map_err(|error| error.to_string())?;
     let _ = task_id;
     Ok(stored)
 }
 
-#[tauri::command]
-pub fn orchestrator_snapshot(store: State<'_, OrchestratorStore>) -> Result<Value, String> {
+#[tauri::command(async)]
+pub async fn orchestrator_snapshot(store: State<'_, OrchestratorStore>) -> Result<Value, String> {
     store.snapshot()
 }
 
-#[tauri::command]
-pub fn orchestrator_upsert_run(
+#[tauri::command(async)]
+pub async fn orchestrator_upsert_run(
     store: State<'_, OrchestratorStore>,
     run: Value,
 ) -> Result<Value, String> {
@@ -101,8 +95,8 @@ pub fn orchestrator_upsert_run(
     store.upsert("runs", &id, &run_id, &state, &run)
 }
 
-#[tauri::command]
-pub fn orchestrator_upsert_task(
+#[tauri::command(async)]
+pub async fn orchestrator_upsert_task(
     store: State<'_, OrchestratorStore>,
     task: Value,
 ) -> Result<Value, String> {
@@ -112,8 +106,8 @@ pub fn orchestrator_upsert_task(
     store.upsert("tasks", &id, &run_id, &state, &task)
 }
 
-#[tauri::command]
-pub fn orchestrator_upsert_approval(
+#[tauri::command(async)]
+pub async fn orchestrator_upsert_approval(
     store: State<'_, OrchestratorStore>,
     approval: Value,
 ) -> Result<Value, String> {
@@ -123,8 +117,8 @@ pub fn orchestrator_upsert_approval(
     store.upsert("approvals", &id, &run_id, &state, &approval)
 }
 
-#[tauri::command]
-pub fn orchestrator_emit_event(
+#[tauri::command(async)]
+pub async fn orchestrator_emit_event(
     app: AppHandle,
     store: State<'_, OrchestratorStore>,
     event: Value,
@@ -132,16 +126,16 @@ pub fn orchestrator_emit_event(
     emit_event(&app, &store, &event)
 }
 
-#[tauri::command]
-pub fn orchestrator_next_event_id(
+#[tauri::command(async)]
+pub async fn orchestrator_next_event_id(
     store: State<'_, OrchestratorStore>,
     run_id: String,
 ) -> Result<i64, String> {
     store.next_sequence(&run_id)
 }
 
-#[tauri::command]
-pub fn orchestrator_register_agent(
+#[tauri::command(async)]
+pub async fn orchestrator_register_agent(
     store: State<'_, OrchestratorStore>,
     agent: Value,
 ) -> Result<(), String> {
@@ -156,25 +150,32 @@ pub fn orchestrator_register_agent(
     Ok(())
 }
 
-#[tauri::command]
-pub fn orchestrator_unregister_agent(
+#[tauri::command(async)]
+pub async fn orchestrator_unregister_agent(
     store: State<'_, OrchestratorStore>,
     id: String,
 ) -> Result<(), String> {
     store.remove("agents", &id)
 }
 
-#[tauri::command]
-pub fn orchestrator_run_dir(app: AppHandle, run_id: String) -> Result<String, String> {
-    let path = orchestrator_root(&app)?
-        .join("runs")
-        .join(run_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect::<String>());
+#[tauri::command(async)]
+pub async fn orchestrator_run_dir(app: AppHandle, run_id: String) -> Result<String, String> {
+    let path = orchestrator_root(&app)?.join("runs").join(
+        run_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect::<String>(),
+    );
     std::fs::create_dir_all(&path).map_err(|error| error.to_string())?;
     Ok(path.to_string_lossy().to_string())
 }
 
-#[tauri::command]
-pub fn orchestrator_artifact_write(app: AppHandle, path: String, contents: String) -> Result<(), String> {
+#[tauri::command(async)]
+pub async fn orchestrator_artifact_write(
+    app: AppHandle,
+    path: String,
+    contents: String,
+) -> Result<(), String> {
     let path = safe_artifact_path(&app, &path)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -182,27 +183,70 @@ pub fn orchestrator_artifact_write(app: AppHandle, path: String, contents: Strin
     std::fs::write(path, contents).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub fn orchestrator_artifact_read(app: AppHandle, path: String) -> Result<String, String> {
+#[tauri::command(async)]
+pub async fn orchestrator_artifact_read(app: AppHandle, path: String) -> Result<String, String> {
     let path = safe_artifact_path(&app, &path)?;
     std::fs::read_to_string(path).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub fn orchestrator_artifact_wait(
+#[tauri::command(async)]
+pub async fn orchestrator_artifact_wait(
     app: AppHandle,
     path: String,
     timeout_ms: u64,
 ) -> Result<bool, String> {
-    let path = safe_artifact_path(&app, &path)?;
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(600_000));
-    while Instant::now() < deadline {
-        if path.is_file() {
-            return Ok(true);
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = safe_artifact_path(&app, &path)?;
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(600_000));
+        while Instant::now() < deadline {
+            if path.is_file() {
+                return Ok(true);
+            }
+            std::thread::sleep(Duration::from_millis(150));
         }
-        std::thread::sleep(Duration::from_millis(150));
+        Ok(path.is_file())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn agent_launch(
+    store: &OrchestratorStore,
+    session_id: &str,
+) -> Result<(Option<String>, Option<String>, Option<String>), String> {
+    let agent = store
+        .get("agents", session_id)?
+        .ok_or_else(|| format!("agent session {} not found", session_id))?;
+    let optional = |key: &str| {
+        agent
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    Ok((optional("shell"), optional("cwd"), optional("command")))
+}
+
+fn ensure_agent_session(
+    app: &AppHandle,
+    pty: &State<'_, PtyState>,
+    store: &State<'_, OrchestratorStore>,
+    session_id: &str,
+) -> Result<(), String> {
+    let exists = pty
+        .sessions
+        .lock()
+        .map_err(|error| error.to_string())?
+        .contains_key(session_id);
+    if exists {
+        return Ok(());
     }
-    Ok(path.is_file())
+    let (shell, cwd, command) = agent_launch(store, session_id)?;
+    crate::ensure_pty_session(app, pty, session_id, shell, cwd)?;
+    if let Some(command) = command {
+        pty_write_session(pty, session_id, &format!("{}\r", command))?;
+    }
+    Ok(())
 }
 
 fn workspace_by_id(store: &OrchestratorStore, id: &str) -> Result<Value, String> {
@@ -211,8 +255,8 @@ fn workspace_by_id(store: &OrchestratorStore, id: &str) -> Result<Value, String>
         .ok_or_else(|| format!("workspace {} not found", id))
 }
 
-#[tauri::command]
-pub fn orchestrator_workspace_create(
+#[tauri::command(async)]
+pub async fn orchestrator_workspace_create(
     app: AppHandle,
     store: State<'_, OrchestratorStore>,
     run_id: String,
@@ -226,8 +270,8 @@ pub fn orchestrator_workspace_create(
     store.upsert("workspaces", &id, &run_id, &isolation_mode, &workspace)
 }
 
-#[tauri::command]
-pub fn orchestrator_workspace_status(
+#[tauri::command(async)]
+pub async fn orchestrator_workspace_status(
     store: State<'_, OrchestratorStore>,
     workspace_id: String,
 ) -> Result<Value, String> {
@@ -235,8 +279,8 @@ pub fn orchestrator_workspace_status(
     git::status(&workspace)
 }
 
-#[tauri::command]
-pub fn orchestrator_workspace_diff(
+#[tauri::command(async)]
+pub async fn orchestrator_workspace_diff(
     store: State<'_, OrchestratorStore>,
     workspace_id: String,
 ) -> Result<String, String> {
@@ -244,8 +288,8 @@ pub fn orchestrator_workspace_diff(
     git::diff(&workspace)
 }
 
-#[tauri::command]
-pub fn orchestrator_run_command(
+#[tauri::command(async)]
+pub async fn orchestrator_run_command(
     store: State<'_, OrchestratorStore>,
     workspace_id: String,
     command: String,
@@ -254,8 +298,8 @@ pub fn orchestrator_run_command(
     git::run_command(&workspace, &command)
 }
 
-#[tauri::command]
-pub fn orchestrator_integrate(
+#[tauri::command(async)]
+pub async fn orchestrator_integrate(
     store: State<'_, OrchestratorStore>,
     workspace_id: String,
     target: String,
@@ -264,17 +308,21 @@ pub fn orchestrator_integrate(
     git::integrate(&workspace, &target)
 }
 
-#[tauri::command]
-pub fn orchestrator_send_prompt(
+#[tauri::command(async)]
+pub async fn orchestrator_send_prompt(
+    app: AppHandle,
     pty: State<'_, PtyState>,
+    store: State<'_, OrchestratorStore>,
     session_id: String,
     prompt: String,
 ) -> Result<(), String> {
+    ensure_agent_session(&app, &pty, &store, &session_id)?;
     pty_write_session(&pty, &session_id, &format!("{}\r", prompt))
 }
 
-#[tauri::command]
-pub fn orchestrator_dispatch(
+#[tauri::command(async)]
+pub async fn orchestrator_dispatch(
+    app: AppHandle,
     pty: State<'_, PtyState>,
     store: State<'_, OrchestratorStore>,
     task_id: String,
@@ -282,6 +330,7 @@ pub fn orchestrator_dispatch(
     workspace_id: String,
     prompt: String,
 ) -> Result<(), String> {
+    ensure_agent_session(&app, &pty, &store, &session_id)?;
     let workspace = workspace_by_id(&store, &workspace_id)?;
     let path = string_field(&workspace, "path")?;
     let cd = if cfg!(windows) {
@@ -315,8 +364,8 @@ pub fn orchestrator_dispatch(
     Ok(())
 }
 
-#[tauri::command]
-pub fn orchestrator_recover(
+#[tauri::command(async)]
+pub async fn orchestrator_recover(
     app: AppHandle,
     store: State<'_, OrchestratorStore>,
     pty: State<'_, PtyState>,
@@ -348,10 +397,7 @@ pub fn orchestrator_recover(
         }
     }
     {
-        let mut grants = browser
-            .grants
-            .lock()
-            .map_err(|error| error.to_string())?;
+        let mut grants = browser.grants.lock().map_err(|error| error.to_string())?;
         let expired: Vec<String> = grants
             .iter()
             .filter(|(_, grant)| grant.expires_at <= current_millis())
@@ -382,8 +428,8 @@ fn current_millis() -> i64 {
         .unwrap_or(0)
 }
 
-#[tauri::command]
-pub fn orchestrator_browser_bridge_start(
+#[tauri::command(async)]
+pub async fn orchestrator_browser_bridge_start(
     app: AppHandle,
     browser: State<'_, BrowserBridgeState>,
     tab_label: String,
@@ -399,16 +445,16 @@ pub fn orchestrator_browser_bridge_start(
     }))
 }
 
-#[tauri::command]
-pub fn orchestrator_browser_bridge_stop(
+#[tauri::command(async)]
+pub async fn orchestrator_browser_bridge_stop(
     browser: State<'_, BrowserBridgeState>,
     token: String,
 ) -> Result<(), String> {
     browser_bridge::stop(&browser, &token)
 }
 
-#[tauri::command]
-pub fn orchestrator_browser_call(
+#[tauri::command(async)]
+pub async fn orchestrator_browser_call(
     app: AppHandle,
     browser: State<'_, BrowserBridgeState>,
     tab_label: String,
@@ -420,8 +466,8 @@ pub fn orchestrator_browser_call(
     browser_bridge::call(&app, &browser, &tab_label, &token, &op, &args)
 }
 
-#[tauri::command]
-pub fn orchestrator_browser_inspect(
+#[tauri::command(async)]
+pub async fn orchestrator_browser_inspect(
     app: AppHandle,
     browser: State<'_, BrowserBridgeState>,
     tab_label: String,
@@ -431,8 +477,8 @@ pub fn orchestrator_browser_inspect(
     browser_bridge::inspect(&app, &browser, &tab_label, &token, enabled)
 }
 
-#[tauri::command]
-pub fn orchestrator_browser_snapshot(
+#[tauri::command(async)]
+pub async fn orchestrator_browser_snapshot(
     app: AppHandle,
     tab_label: String,
 ) -> Result<Value, String> {

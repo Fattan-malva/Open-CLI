@@ -196,7 +196,9 @@ pub fn run_command(data: &Value, shell_command: &str) -> Result<Value, String> {
 
 pub fn integrate(data: &Value, target: &str) -> Result<Value, String> {
     if target != "worktree" {
-        return Ok(json!({ "ok": false, "conflict": false, "output": "unsupported integration target" }));
+        return Ok(
+            json!({ "ok": false, "conflict": false, "output": "unsupported integration target" }),
+        );
     }
     let (path, base) = workspace_path(data)?;
     let workspace = Path::new(&path);
@@ -206,20 +208,32 @@ pub fn integrate(data: &Value, target: &str) -> Result<Value, String> {
         .ok_or_else(|| "workspace has no root".to_string())?;
     let root = Path::new(root_value);
     if base.is_empty() || !is_git_repo(root) || !is_git_repo(workspace) {
-        return Ok(json!({ "ok": false, "conflict": false, "output": "integration requires git worktrees" }));
+        return Ok(
+            json!({ "ok": false, "conflict": false, "output": "integration requires git worktrees" }),
+        );
     }
     let patch = git(&["diff", &base, "HEAD"], workspace)?;
     if !patch.status.success() {
-        return Ok(json!({ "ok": false, "conflict": false, "output": String::from_utf8_lossy(&patch.stderr).to_string() }));
+        return Ok(
+            json!({ "ok": false, "conflict": false, "output": String::from_utf8_lossy(&patch.stderr).to_string() }),
+        );
     }
     let patch_dir = workspace.parent().unwrap_or(workspace).join("patches");
     std::fs::create_dir_all(&patch_dir).map_err(|error| error.to_string())?;
-    let patch_path = patch_dir.join(format!("{}.patch", super::store::now().replace([':', '-'], "")));
+    let patch_path = patch_dir.join(format!(
+        "{}.patch",
+        super::store::now().replace([':', '-'], "")
+    ));
     std::fs::write(&patch_path, &patch.stdout).map_err(|error| error.to_string())?;
     let patch_arg = patch_path.to_string_lossy().to_string();
-    let apply = git(&["apply", "--3way", "--whitespace=nowarn", &patch_arg], root)?;
+    let apply = git(
+        &["apply", "--3way", "--whitespace=nowarn", &patch_arg],
+        root,
+    )?;
     if apply.status.success() {
-        return Ok(json!({ "ok": true, "conflict": false, "output": String::from_utf8_lossy(&apply.stdout).to_string() }));
+        return Ok(
+            json!({ "ok": true, "conflict": false, "output": String::from_utf8_lossy(&apply.stdout).to_string() }),
+        );
     }
     let output = format!(
         "{}\n{}",

@@ -30,12 +30,12 @@ pub fn init(app: &AppHandle) {
         }
     }
     app.manage(BrowserBridgeState::default());
-    let result = commands::orchestrator_recover(
+    let result = tauri::async_runtime::block_on(commands::orchestrator_recover(
         app.clone(),
         app.state::<OrchestratorStore>(),
         app.state::<PtyState>(),
         app.state::<BrowserBridgeState>(),
-    );
+    ));
     if let Err(error) = result {
         eprintln!("orchestrator recovery error: {}", error);
     }

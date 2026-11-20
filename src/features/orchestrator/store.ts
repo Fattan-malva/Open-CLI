@@ -13,7 +13,7 @@ import {
   prepareWorkspaces,
   type EngineContext,
 } from './engine'
-import { EventHub } from './events'
+import { applyEvent, EventHub } from './events'
 import { isTerminalTaskState } from './state-machines'
 import {
   AgentSession,
@@ -55,7 +55,14 @@ type OrchestratorState = {
   hydrate: () => Promise<void>
   setMode: (mode: OrchestratorMode) => void
   syncAgents: (
-    tabs: Array<{ id: string; title: string; agentId?: string }>,
+    tabs: Array<{
+      id: string
+      title: string
+      agentId?: string
+      shell?: string
+      cwd?: string
+      command?: string
+    }>,
     catalog: Array<{ id: string; name: string }>
   ) => Promise<void>
   refreshAgents: () => Promise<void>
@@ -88,7 +95,7 @@ const EMPTY: SnapshotValue = {
 
 const EMPTY_CONTEXT: BrowserContextValue = { page: null, element: null }
 
-const ACTIVE_TASK_STATUSES = new Set<TaskValue['status']>([
+export const ACTIVE_TASK_STATUSES = new Set<TaskValue['status']>([
   'assigned',
   'running',
   'waiting',
@@ -110,6 +117,11 @@ function timestamp(): string {
 
 let unlistenEvents: (() => void) | null = null
 let unlistenElements: (() => void) | null = null
+let hydratePromise: Promise<void> | null = null
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+let refreshPending = false
+let agentSyncTail: Promise<void> = Promise.resolve()
+let coordinatorPending = false
 
 export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   snapshot: EMPTY,
@@ -127,35 +139,39 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   engine: defaultEngineContext,
   hydrated: false,
 
-  hydrate: async () => {
-    if (get().hydrated) return
-    try {
-      const snapshot = await api.recoverOrchestrator()
-      set({ snapshot, hydrated: true })
-      unlistenEvents = await api.onOrchestratorEvent((event: OrchestratorEventValue) => {
-        const state = get()
-        const next = {
-          ...state.snapshot,
-          events: [...state.snapshot.events, event].slice(-500),
-        }
-        set({ snapshot: next })
-        void state.engine
-          .snapshot()
-          .then((fresh) => {
-            set({ snapshot: fresh })
-            return get().refreshAgents()
-          })
-          .catch(() => undefined)
-      })
-      unlistenElements = await api.onBrowserElement((payload) => {
-        void get().handleElement(payload)
-      })
-    } catch (error) {
-      set({
-        hydrated: true,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
+  hydrate: () => {
+    if (get().hydrated) return Promise.resolve()
+    if (hydratePromise) return hydratePromise
+    hydratePromise = (async () => {
+      try {
+        const snapshot = await api.recoverOrchestrator()
+        set({ snapshot, hydrated: true, error: null })
+        unlistenEvents = await api.onOrchestratorEvent((event: OrchestratorEventValue) => {
+          const state = get()
+          const next = applyEvent(state.snapshot, event, state.eventHub)
+          if (next === state.snapshot) return
+          set({ snapshot: next })
+          if (refreshPending) return
+          refreshPending = true
+          refreshTimer = setTimeout(() => {
+            refreshPending = false
+            refreshTimer = null
+            void get().refreshAgents()
+          }, 120)
+        })
+        unlistenElements = await api.onBrowserElement((payload) => {
+          void get().handleElement(payload)
+        })
+      } catch (error) {
+        set({
+          hydrated: true,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        hydratePromise = null
+      }
+    })()
+    return hydratePromise
   },
 
   setMode: (mode) => {
@@ -166,58 +182,87 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     set({ mode, error: null })
   },
 
-  syncAgents: async (tabs, catalog) => {
-    try {
-      const byId = new Map(catalog.map((item) => [item.id, item.name]))
-      const seen = new Set<string>()
-      for (const tab of tabs) {
-        if (!tab.agentId) continue
-        const id = tab.id
-        seen.add(id)
-        const parsed = AgentSession.parse({
-          id,
-          adapterId: tab.agentId,
-          agentId: tab.agentId,
-          label: tab.title || byId.get(tab.agentId) || tab.agentId,
-          terminalId: tab.id,
-          capabilities: ['*'],
-          status: 'idle',
-          lastSeen: timestamp(),
-        })
-        parsed.status = agentStatusFor(get().snapshot.tasks, id)
-        const current = get().snapshot.agents.find((agent) => agent.id === id)
-        const changed =
-          !current ||
-          current.label !== parsed.label ||
-          current.adapterId !== parsed.adapterId ||
-          current.agentId !== parsed.agentId ||
-          current.terminalId !== parsed.terminalId ||
-          current.status !== parsed.status ||
-          current.capabilities.join('\u0000') !== parsed.capabilities.join('\u0000')
-        if (changed) await api.registerAgent(parsed)
+  syncAgents: (tabs, catalog) => {
+    const run = async () => {
+      try {
+        const byId = new Map(catalog.map((item) => [item.id, item.name]))
+        const seen = new Set<string>()
+        const snapshot = get().snapshot
+        const activeOwners = new Set(
+          snapshot.tasks
+            .filter((task) => ACTIVE_TASK_STATUSES.has(task.status) && task.ownerSessionId)
+            .map((task) => task.ownerSessionId as string)
+        )
+        let changed = false
+        for (const tab of tabs) {
+          if (!tab.agentId) continue
+          const id = tab.id
+          seen.add(id)
+          const parsed = AgentSession.parse({
+            id,
+            adapterId: tab.agentId,
+            agentId: tab.agentId,
+            label: tab.title || byId.get(tab.agentId) || tab.agentId,
+            terminalId: tab.id,
+            shell: tab.shell,
+            cwd: tab.cwd,
+            command: tab.command,
+            capabilities: ['*'],
+            status: 'idle',
+            lastSeen: timestamp(),
+          })
+          parsed.status = agentStatusFor(snapshot.tasks, id)
+          const current = snapshot.agents.find((agent) => agent.id === id)
+          const dirty =
+            !current ||
+            current.label !== parsed.label ||
+            current.adapterId !== parsed.adapterId ||
+            current.agentId !== parsed.agentId ||
+            current.terminalId !== parsed.terminalId ||
+            current.shell !== parsed.shell ||
+            current.cwd !== parsed.cwd ||
+            current.command !== parsed.command ||
+            current.status !== parsed.status ||
+            current.capabilities.join('\u0000') !== parsed.capabilities.join('\u0000')
+          if (dirty) {
+            await api.registerAgent(parsed)
+            changed = true
+          }
+        }
+        for (const agent of snapshot.agents) {
+          if (seen.has(agent.id) || activeOwners.has(agent.id)) continue
+          await api.unregisterAgent(agent.id)
+          changed = true
+        }
+        if (changed) {
+          set({ snapshot: await api.orchestratorSnapshot(), error: null })
+        }
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : String(error) })
       }
-      for (const agent of get().snapshot.agents) {
-        if (!seen.has(agent.id)) await api.unregisterAgent(agent.id)
-      }
-      set({ snapshot: await api.orchestratorSnapshot(), error: null })
-    } catch (error) {
-      set({ error: error instanceof Error ? error.message : String(error) })
     }
+    agentSyncTail = agentSyncTail.then(run, run)
+    return agentSyncTail
   },
 
-  refreshAgents: async () => {
-    try {
-      const current = get().snapshot
-      for (const agent of current.agents) {
-        const status = agentStatusFor(current.tasks, agent.id)
-        if (agent.status !== status) {
+  refreshAgents: () => {
+    const run = async () => {
+      try {
+        const current = get().snapshot
+        let changed = false
+        for (const agent of current.agents) {
+          const status = agentStatusFor(current.tasks, agent.id)
+          if (agent.status === status) continue
           await api.registerAgent({ ...agent, status, lastSeen: timestamp() })
+          changed = true
         }
+        if (changed) set({ snapshot: await api.orchestratorSnapshot() })
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : String(error) })
       }
-      set({ snapshot: await api.orchestratorSnapshot() })
-    } catch (error) {
-      set({ error: error instanceof Error ? error.message : String(error) })
     }
+    agentSyncTail = agentSyncTail.then(run, run)
+    return agentSyncTail
   },
 
   sendChat: async (text) => {
@@ -307,12 +352,46 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   },
 
   setCoordinator: async (agentId) => {
-    if (!agentId) return
+    if (!agentId || coordinatorPending) return
     const state = get()
     const run = state.snapshot.runs.find((item) => item.id === state.activeRunId)
-    if (!run) return
-    await api.putRun({ ...run, coordinatorId: agentId, updatedAt: timestamp() })
-    set({ snapshot: await state.engine.snapshot(), error: null })
+    if (!run || run.coordinatorId === agentId) return
+    coordinatorPending = true
+    const previous = run.coordinatorId
+    set({
+      error: null,
+      snapshot: {
+        ...state.snapshot,
+        runs: state.snapshot.runs.map((item) =>
+          item.id === run.id ? { ...item, coordinatorId: agentId } : item
+        ),
+      },
+    })
+    try {
+      const saved = await api.putRun({
+        ...run,
+        coordinatorId: agentId,
+        updatedAt: timestamp(),
+      })
+      set((current) => ({
+        snapshot: {
+          ...current.snapshot,
+          runs: current.snapshot.runs.map((item) => (item.id === saved.id ? saved : item)),
+        },
+      }))
+    } catch (error) {
+      set((current) => ({
+        error: error instanceof Error ? error.message : String(error),
+        snapshot: {
+          ...current.snapshot,
+          runs: current.snapshot.runs.map((item) =>
+            item.id === run.id ? { ...item, coordinatorId: previous } : item
+          ),
+        },
+      }))
+    } finally {
+      coordinatorPending = false
+    }
   },
 
   approveAndExecute: async () => {
@@ -474,4 +553,10 @@ export function detachOrchestratorListeners(): void {
   unlistenElements?.()
   unlistenEvents = null
   unlistenElements = null
+  hydratePromise = null
+  refreshPending = false
+  if (refreshTimer !== null) clearTimeout(refreshTimer)
+  refreshTimer = null
+  useOrchestratorStore.setState({ hydrated: false })
+  useOrchestratorStore.getState().eventHub.reset()
 }

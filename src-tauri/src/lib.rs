@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-#[cfg(windows)]
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 mod orchestrator;
 
@@ -19,9 +19,9 @@ use tauri::{
 };
 
 #[cfg(windows)]
-use std::os::windows::process::CommandExt;
-#[cfg(windows)]
 use std::os::windows::io::RawHandle;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 use winapi::shared::minwindef::{DWORD, LPVOID};
 #[cfg(windows)]
@@ -30,20 +30,21 @@ use winapi::shared::ntdef::HANDLE;
 use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
 #[cfg(windows)]
 use winapi::um::jobapi2::{
-    AssignProcessToJobObject, CreateJobObjectW, QueryInformationJobObject,
-    SetInformationJobObject, TerminateJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, QueryInformationJobObject, SetInformationJobObject,
+    TerminateJobObject,
 };
 #[cfg(windows)]
+use winapi::um::sysinfoapi::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+#[cfg(windows)]
 use winapi::um::tlhelp32::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-    TH32CS_SNAPPROCESS,
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 #[cfg(windows)]
 use winapi::um::winbase::CREATE_NO_WINDOW;
 #[cfg(windows)]
 use winapi::um::winnt::{
-    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation,
+    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 
@@ -55,14 +56,22 @@ struct PtyEvent {
 }
 
 const AGENT_CLI_FILE: &str = "cli-agent.json";
-const EMPTY_AGENT_CLI_JSON: &str =
-    "{\"customAgents\":[],\"activeIds\":[],\"projectPath\":null}";
+const EMPTY_AGENT_CLI_JSON: &str = "{\"customAgents\":[],\"activeIds\":[],\"projectPath\":null}";
 const BROWSER_PRIVACY_FILE: &str = "browser-privacy.json";
 const EMPTY_BROWSER_PRIVACY_JSON: &str = "{\"sessionOnly\":false}";
 const LEGACY_APP_DIR_NAME: &str = "com.opencli.app";
 const LEGACY_RUNTIME_DIR_NAME: &str = "OpenCLI";
 const DEV_APP_DIR_NAME: &str = "opencli-dev";
 const UNINSTALL_CONFIRMATION: &str = "UNINSTALL";
+const PTY_FLUSH_INTERVAL_MS: u128 = 16;
+const PTY_FLUSH_BYTES: usize = 32 * 1024;
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -165,6 +174,8 @@ struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
+    active: Arc<AtomicBool>,
+    last_output: Arc<AtomicU64>,
     #[cfg(windows)]
     job: Option<JobHandle>,
 }
@@ -172,20 +183,19 @@ struct Session {
 #[derive(Default)]
 pub(crate) struct PtyState {
     pub(crate) sessions: Arc<Mutex<HashMap<String, Session>>>,
+    starting: Mutex<HashSet<String>>,
 }
 
-pub(crate) fn pty_write_session(
-    state: &PtyState,
-    id: &str,
-    data: &str,
-) -> Result<(), String> {
+pub(crate) fn pty_write_session(state: &PtyState, id: &str, data: &str) -> Result<(), String> {
     let mut sessions = state.sessions.lock().unwrap();
     let session = sessions.get_mut(id).ok_or("session not found")?;
     session
         .writer
         .write_all(data.as_bytes())
         .and_then(|_| session.writer.flush())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    session.last_output.store(now_millis(), Ordering::Relaxed);
+    Ok(())
 }
 
 fn emit(app: &AppHandle, event: &str, id: &str, data: String) {
@@ -290,6 +300,116 @@ fn terminate_tree(session: &mut Session) {
     let _ = session.child.wait();
 }
 
+fn spawn_pty_session(
+    app: &AppHandle,
+    state: &PtyState,
+    id: &str,
+    cols: u16,
+    rows: u16,
+    shell: Option<String>,
+    cwd: Option<String>,
+) -> Result<(), String> {
+    {
+        let mut starting = state.starting.lock().unwrap();
+        if !starting.insert(id.to_string()) {
+            return Ok(());
+        }
+        if state.sessions.lock().unwrap().contains_key(id) {
+            starting.remove(id);
+            return Ok(());
+        }
+    }
+
+    let result = (|| -> Result<(), String> {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| e.to_string())?;
+
+        let shell = shell.unwrap_or_else(|| "powershell.exe".to_string());
+        let mut cmd = CommandBuilder::new(&shell);
+        if shell.to_lowercase().contains("powershell") && !shell.to_lowercase().contains("pwsh") {
+            cmd.arg("-NoLogo");
+        }
+        cmd.env("TERM", "xterm-256color");
+        if let Some(dir) = cwd {
+            cmd.cwd(dir);
+        }
+
+        let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+        drop(pair.slave);
+
+        #[cfg(windows)]
+        let job = JobHandle::new().and_then(|job| {
+            let handle = child.as_raw_handle()?;
+            if job.assign(handle) {
+                Some(job)
+            } else {
+                None
+            }
+        });
+
+        let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+        let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+        let active = Arc::new(AtomicBool::new(true));
+        let last_output = Arc::new(AtomicU64::new(now_millis()));
+
+        state.sessions.lock().unwrap().insert(
+            id.to_string(),
+            Session {
+                writer,
+                master: pair.master,
+                child,
+                active: active.clone(),
+                last_output: last_output.clone(),
+                #[cfg(windows)]
+                job,
+            },
+        );
+
+        let event_id = id.to_string();
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            let mut pending: Vec<u8> = Vec::with_capacity(PTY_FLUSH_BYTES);
+            let mut last_flush = Instant::now();
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        for byte in buf[..n].iter().copied().filter(|byte| *byte != 7) {
+                            pending.push(byte);
+                        }
+                        last_output.store(now_millis(), Ordering::Relaxed);
+                        let elapsed = last_flush.elapsed().as_millis();
+                        if pending.len() >= PTY_FLUSH_BYTES || elapsed >= PTY_FLUSH_INTERVAL_MS {
+                            if active.load(Ordering::Relaxed) && !pending.is_empty() {
+                                emit(&app_handle, "pty:data", &event_id, BASE64.encode(&pending));
+                            }
+                            pending.clear();
+                            last_flush = Instant::now();
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            if active.load(Ordering::Relaxed) && !pending.is_empty() {
+                emit(&app_handle, "pty:data", &event_id, BASE64.encode(&pending));
+            }
+            emit(&app_handle, "pty:exit", &event_id, String::new());
+        });
+
+        Ok(())
+    })();
+    state.starting.lock().unwrap().remove(id);
+    result
+}
+
 #[tauri::command]
 fn pty_spawn(
     app: AppHandle,
@@ -300,85 +420,34 @@ fn pty_spawn(
     shell: Option<String>,
     cwd: Option<String>,
 ) -> Result<(), String> {
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| e.to_string())?;
+    spawn_pty_session(&app, &state, &id, cols, rows, shell, cwd)
+}
 
-    let shell = shell.unwrap_or_else(|| "powershell.exe".to_string());
-    let mut cmd = CommandBuilder::new(&shell);
-    if shell.to_lowercase().contains("powershell") && !shell.to_lowercase().contains("pwsh") {
-        cmd.arg("-NoLogo");
+#[tauri::command]
+fn pty_ensure(
+    app: AppHandle,
+    state: State<'_, PtyState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+    shell: Option<String>,
+    cwd: Option<String>,
+) -> Result<bool, String> {
+    if state.sessions.lock().unwrap().contains_key(&id) {
+        return Ok(false);
     }
-    cmd.env("TERM", "xterm-256color");
-    if let Some(dir) = cwd {
-        cmd.cwd(dir);
-    }
+    spawn_pty_session(&app, &state, &id, cols, rows, shell, cwd)?;
+    Ok(true)
+}
 
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| e.to_string())?;
-    drop(pair.slave);
-
-    #[cfg(windows)]
-    let job = JobHandle::new().and_then(|job| {
-        let handle = child.as_raw_handle()?;
-        if job.assign(handle) {
-            Some(job)
-        } else {
-            None
-        }
-    });
-
-    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-
-    state.sessions.lock().unwrap().insert(
-        id.clone(),
-        Session {
-            writer,
-            master: pair.master,
-            child,
-            #[cfg(windows)]
-            job,
-        },
-    );
-
-    let event_id = id.clone();
-    let app_handle = app.clone();
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 8192];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let filtered: Vec<u8> = buf[..n]
-                        .iter()
-                        .copied()
-                        .filter(|byte| *byte != 7)
-                        .collect();
-                    if !filtered.is_empty() {
-                        emit(
-                            &app_handle,
-                            "pty:data",
-                            &event_id,
-                            BASE64.encode(&filtered),
-                        );
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        emit(&app_handle, "pty:exit", &event_id, String::new());
-    });
-
-    Ok(())
+pub(crate) fn ensure_pty_session(
+    app: &AppHandle,
+    state: &PtyState,
+    id: &str,
+    shell: Option<String>,
+    cwd: Option<String>,
+) -> Result<(), String> {
+    spawn_pty_session(app, state, id, 80, 24, shell, cwd)
 }
 
 #[tauri::command]
@@ -387,12 +456,7 @@ fn pty_write(state: State<'_, PtyState>, id: String, data: String) -> Result<(),
 }
 
 #[tauri::command]
-fn pty_resize(
-    state: State<'_, PtyState>,
-    id: String,
-    cols: u16,
-    rows: u16,
-) -> Result<(), String> {
+fn pty_resize(state: State<'_, PtyState>, id: String, cols: u16, rows: u16) -> Result<(), String> {
     let sessions = state.sessions.lock().unwrap();
     let session = sessions.get(&id).ok_or("session not found")?;
     session
@@ -452,6 +516,58 @@ fn pty_kill(app: AppHandle, state: State<'_, PtyState>, id: String) -> Result<()
     Ok(())
 }
 
+#[tauri::command]
+fn pty_set_active(state: State<'_, PtyState>, id: String, active: bool) -> Result<(), String> {
+    let sessions = state.sessions.lock().unwrap();
+    let Some(session) = sessions.get(&id) else {
+        return Ok(());
+    };
+    session.active.store(active, Ordering::Relaxed);
+    if active {
+        session.last_output.store(now_millis(), Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_idle_sessions(
+    state: State<'_, PtyState>,
+    idle_after_ms: u64,
+) -> Result<Vec<String>, String> {
+    let now = now_millis();
+    let sessions = state.sessions.lock().unwrap();
+    Ok(sessions
+        .iter()
+        .filter(|(_, session)| {
+            now.saturating_sub(session.last_output.load(Ordering::Relaxed)) >= idle_after_ms
+        })
+        .map(|(id, _)| id.clone())
+        .collect())
+}
+
+#[tauri::command]
+fn pty_suspend(state: State<'_, PtyState>, id: String) -> Result<bool, String> {
+    let mut sessions = state.sessions.lock().unwrap();
+    if let Some(mut session) = sessions.remove(&id) {
+        terminate_tree(&mut session);
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+#[tauri::command]
+fn system_memory_available_percent() -> Result<f64, String> {
+    #[cfg(windows)]
+    unsafe {
+        let mut status: MEMORYSTATUSEX = std::mem::zeroed();
+        status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        if GlobalMemoryStatusEx(&mut status) != 0 && status.ullTotalPhys > 0 {
+            return Ok((status.ullAvailPhys as f64 / status.ullTotalPhys as f64) * 100.0);
+        }
+    }
+    Ok(100.0)
+}
+
 fn kill_all(state: &PtyState) {
     let mut sessions = state.sessions.lock().unwrap();
     for (_, mut session) in sessions.drain() {
@@ -477,13 +593,17 @@ fn browser_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn browser_privacy_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
     Ok(root.join("data").join(BROWSER_PRIVACY_FILE))
 }
 
 fn default_browser_privacy() -> BrowserPrivacy {
-    serde_json::from_str::<BrowserPrivacy>(EMPTY_BROWSER_PRIVACY_JSON)
-        .unwrap_or(BrowserPrivacy { session_only: false })
+    serde_json::from_str::<BrowserPrivacy>(EMPTY_BROWSER_PRIVACY_JSON).unwrap_or(BrowserPrivacy {
+        session_only: false,
+    })
 }
 
 fn read_browser_privacy(app: &AppHandle) -> BrowserPrivacy {
@@ -537,7 +657,14 @@ fn close_browser_webviews(app: &AppHandle) -> Result<(), String> {
         .filter(|label| label.starts_with("browser-tab-") || label == BROWSER_WEBVIEW_LABEL)
         .collect();
 
+    let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
+    let bridge_state = orchestrator::browser_bridge::BrowserBridgeState {
+        grants: bridge.grants.clone(),
+        stops: bridge.stops.clone(),
+        inspects: bridge.inspects.clone(),
+    };
     for label in labels {
+        orchestrator::browser_bridge::stop_for_tab(&bridge_state, &label)?;
         if let Some(webview) = app.get_webview(&label) {
             webview.close().map_err(|error| error.to_string())?;
         }
@@ -568,7 +695,9 @@ async fn browser_open(
             webview
                 .set_bounds(browser_bounds(x, y, width, height))
                 .map_err(|error| error.to_string())?;
-            webview.navigate(target).map_err(|error| error.to_string())?;
+            webview
+                .navigate(target)
+                .map_err(|error| error.to_string())?;
             webview.show().map_err(|error| error.to_string())?;
             webview.set_focus().map_err(|error| error.to_string())?;
             return Ok(());
@@ -675,7 +804,9 @@ async fn browser_tab_navigate(app: AppHandle, label: String, url: String) -> Res
             .ok_or_else(|| "tab browser tidak ditemukan".to_string())?;
         let target = tauri::Url::parse(&url).map_err(|error| error.to_string())?;
 
-        webview.navigate(target).map_err(|error| error.to_string())?;
+        webview
+            .navigate(target)
+            .map_err(|error| error.to_string())?;
         webview.show().map_err(|error| error.to_string())?;
         webview.set_focus().map_err(|error| error.to_string())?;
 
@@ -696,19 +827,46 @@ async fn browser_tab_sync(
     height: f64,
 ) -> Result<(), String> {
     let bounds = move || browser_bounds(x, y, width, height);
+    let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
+    let bridge_state = orchestrator::browser_bridge::BrowserBridgeState {
+        grants: bridge.grants.clone(),
+        stops: bridge.stops.clone(),
+        inspects: bridge.inspects.clone(),
+    };
+    let protected: HashSet<String> = bridge_state
+        .grants
+        .lock()
+        .map_err(|error| error.to_string())?
+        .values()
+        .map(|grant| grant.tab_label.clone())
+        .collect();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         for label in labels {
-            let Some(webview) = app.get_webview(&label) else {
-                continue;
-            };
-
             if active.as_ref() == Some(&label) {
-                webview.set_bounds(bounds()).map_err(|error| error.to_string())?;
+                let Some(webview) = app.get_webview(&label) else {
+                    continue;
+                };
+                webview
+                    .set_bounds(bounds())
+                    .map_err(|error| error.to_string())?;
                 webview.show().map_err(|error| error.to_string())?;
                 webview.set_focus().map_err(|error| error.to_string())?;
-            } else {
-                webview.hide().map_err(|error| error.to_string())?;
+                continue;
+            }
+
+            if protected.contains(&label) {
+                if let Some(webview) = app.get_webview(&label) {
+                    webview.hide().map_err(|error| error.to_string())?;
+                }
+                continue;
+            }
+
+            if app.get_webview(&label).is_some() {
+                orchestrator::browser_bridge::stop_for_tab(&bridge_state, &label)?;
+                if let Some(webview) = app.get_webview(&label) {
+                    webview.close().map_err(|error| error.to_string())?;
+                }
             }
         }
 
@@ -720,6 +878,13 @@ async fn browser_tab_sync(
 
 #[tauri::command]
 async fn browser_tab_close(app: AppHandle, label: String) -> Result<(), String> {
+    let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
+    let bridge_state = orchestrator::browser_bridge::BrowserBridgeState {
+        grants: bridge.grants.clone(),
+        stops: bridge.stops.clone(),
+        inspects: bridge.inspects.clone(),
+    };
+    orchestrator::browser_bridge::stop_for_tab(&bridge_state, &label)?;
     if let Some(webview) = app.get_webview(&label) {
         webview.close().map_err(|error| error.to_string())?;
     }
@@ -734,7 +899,10 @@ async fn browser_tabs_close_all(app: AppHandle) -> Result<(), String> {
 }
 
 fn agent_cli_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
     Ok(root.join("data").join(AGENT_CLI_FILE))
 }
 
@@ -812,7 +980,10 @@ fn ensure_agent_cli_file(app: &AppHandle) -> Result<PathBuf, String> {
 
 #[tauri::command]
 fn app_data_path(app: AppHandle) -> Result<String, String> {
-    let root = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
     Ok(root.to_string_lossy().to_string())
 }
 
@@ -839,7 +1010,12 @@ fn browser_session_only_get(app: AppHandle) -> Result<bool, String> {
 
 #[tauri::command]
 fn browser_session_only_set(app: AppHandle, enabled: bool) -> Result<(), String> {
-    write_browser_privacy(&app, &BrowserPrivacy { session_only: enabled })?;
+    write_browser_privacy(
+        &app,
+        &BrowserPrivacy {
+            session_only: enabled,
+        },
+    )?;
     if enabled {
         clear_browsing_data(&app)?;
     }
@@ -856,7 +1032,10 @@ fn app_uninstall(app: AppHandle, confirmation: String) -> Result<(), String> {
     }
 
     let uninstaller = uninstaller_path()?;
-    let data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
     remove_app_data_dir(&data_dir)?;
 
     let legacy_config = app
@@ -940,7 +1119,11 @@ fn fs_list_folders(path: String, query: Option<String>) -> Result<Vec<FsEntry>, 
 
     for item in fs::read_dir(&target).map_err(|error| error.to_string())? {
         let item = item.map_err(|error| error.to_string())?;
-        if !item.file_type().map_err(|error| error.to_string())?.is_dir() {
+        if !item
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
             continue;
         }
 
@@ -972,11 +1155,7 @@ fn dev_data_root() -> Option<PathBuf> {
         return None;
     }
 
-    Some(
-        PathBuf::from(home)
-            .join(".config")
-            .join(DEV_APP_DIR_NAME),
-    )
+    Some(PathBuf::from(home).join(".config").join(DEV_APP_DIR_NAME))
 }
 
 pub fn run() {
@@ -990,9 +1169,14 @@ pub fn run() {
         .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
             pty_spawn,
+            pty_ensure,
             pty_write,
             pty_resize,
             pty_is_busy,
+            pty_set_active,
+            pty_idle_sessions,
+            pty_suspend,
+            system_memory_available_percent,
             pty_kill,
             browser_open,
             browser_set_bounds,
