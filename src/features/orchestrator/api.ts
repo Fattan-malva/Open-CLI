@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+﻿import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { isDesktop } from '@/lib/platform'
 import {
@@ -115,11 +115,11 @@ export function emitEvent(event: OrchestratorEventValue): Promise<OrchestratorEv
 }
 
 export function nextEventSequence(runId: string): Promise<number> {
-  return call('orchestrator_next_event_id', { run_id: runId }, undefined, 0)
+  return call('orchestrator_next_event_id', { runId }, undefined, 0)
 }
 
 export function runArtifactDir(runId: string): Promise<string> {
-  return call('orchestrator_run_dir', { run_id: runId }, undefined, '')
+  return call('orchestrator_run_dir', { runId }, undefined, '')
 }
 
 export function writeArtifact(path: string, contents: string): Promise<void> {
@@ -131,7 +131,7 @@ export function readArtifact(path: string): Promise<string> {
 }
 
 export function waitForArtifact(path: string, timeoutMs: number): Promise<boolean> {
-  return call('orchestrator_artifact_wait', { path, timeout_ms: timeoutMs }, undefined, false)
+  return call('orchestrator_artifact_wait', { path, timeoutMs }, undefined, false)
 }
 
 export function createWorkspace(
@@ -142,13 +142,13 @@ export function createWorkspace(
 ): Promise<WorkspaceValue> {
   return call(
     'orchestrator_workspace_create',
-    { run_id: runId, task_id: taskId, root, isolation_mode: isolationMode },
+    { runId, taskId, root, isolationMode },
     Workspace
   )
 }
 
 export function workspaceStatus(workspaceId: string): Promise<WorkspaceStatus> {
-  return call('orchestrator_workspace_status', { workspace_id: workspaceId }, undefined, {
+  return call('orchestrator_workspace_status', { workspaceId }, undefined, {
     dirty: false,
     changedFiles: [],
     branch: '',
@@ -156,11 +156,11 @@ export function workspaceStatus(workspaceId: string): Promise<WorkspaceStatus> {
 }
 
 export function workspaceDiff(workspaceId: string): Promise<string> {
-  return call('orchestrator_workspace_diff', { workspace_id: workspaceId }, undefined, '')
+  return call('orchestrator_workspace_diff', { workspaceId }, undefined, '')
 }
 
 export function sendPrompt(sessionId: string, prompt: string): Promise<void> {
-  return call('orchestrator_send_prompt', { session_id: sessionId, prompt }, undefined, undefined)
+  return call('orchestrator_send_prompt', { sessionId, prompt }, undefined, undefined)
 }
 
 export function dispatchTask(
@@ -171,14 +171,14 @@ export function dispatchTask(
 ): Promise<void> {
   return call(
     'orchestrator_dispatch',
-    { task_id: taskId, session_id: sessionId, workspace_id: workspaceId, prompt },
+    { taskId, sessionId, workspaceId, prompt },
     undefined,
     undefined
   )
 }
 
 export function runCommand(workspaceId: string, command: string): Promise<CommandResult> {
-  return call('orchestrator_run_command', { workspace_id: workspaceId, command }, undefined, {
+  return call('orchestrator_run_command', { workspaceId, command }, undefined, {
     exitCode: null,
     output: '',
   })
@@ -190,7 +190,7 @@ export function integrateWorkspace(
 ): Promise<{ ok: boolean; conflict: boolean; output: string }> {
   return call(
     'orchestrator_integrate',
-    { workspace_id: workspaceId, target },
+    { workspaceId, target },
     undefined,
     { ok: false, conflict: false, output: '' }
   )
@@ -201,7 +201,7 @@ export function recoverOrchestrator(): Promise<SnapshotValue> {
 }
 
 export function browserBridgeStart(tabLabel: string, agentId: string): Promise<BridgeGrant> {
-  return call('orchestrator_browser_bridge_start', { tab_label: tabLabel, agent_id: agentId })
+  return call('orchestrator_browser_bridge_start', { tabLabel, agentId })
 }
 
 export function browserBridgeStop(token: string): Promise<void> {
@@ -216,7 +216,7 @@ export function browserBridgeCall(
 ): Promise<string> {
   return call(
     'orchestrator_browser_call',
-    { tab_label: tabLabel, token, op, args_json: JSON.stringify(args) },
+    { tabLabel, token, op, argsJson: JSON.stringify(args) },
     undefined,
     ''
   )
@@ -225,14 +225,14 @@ export function browserBridgeCall(
 export function browserInspect(tabLabel: string, token: string, enabled: boolean): Promise<void> {
   return call(
     'orchestrator_browser_inspect',
-    { tab_label: tabLabel, token, enabled },
+    { tabLabel, token, enabled },
     undefined,
     undefined
   )
 }
 
 export function browserPageSnapshot(tabLabel: string): Promise<{ url: string; title: string }> {
-  return call('orchestrator_browser_snapshot', { tab_label: tabLabel }, undefined, {
+  return call('orchestrator_browser_snapshot', { tabLabel }, undefined, {
     url: '',
     title: '',
   })

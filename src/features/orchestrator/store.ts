@@ -60,6 +60,8 @@ type OrchestratorState = {
   ) => Promise<void>
   refreshAgents: () => Promise<void>
   sendChat: (text: string) => Promise<void>
+  generatePlan: (runId?: string) => Promise<void>
+  setCoordinator: (agentId: string) => Promise<void>
   approveAndExecute: () => Promise<void>
   cancelRun: () => Promise<void>
   retryTask: (taskId: string) => Promise<void>
@@ -184,7 +186,15 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
         })
         parsed.status = agentStatusFor(get().snapshot.tasks, id)
         const current = get().snapshot.agents.find((agent) => agent.id === id)
-        if (!current || current.status !== parsed.status) await api.registerAgent(parsed)
+        const changed =
+          !current ||
+          current.label !== parsed.label ||
+          current.adapterId !== parsed.adapterId ||
+          current.agentId !== parsed.agentId ||
+          current.terminalId !== parsed.terminalId ||
+          current.status !== parsed.status ||
+          current.capabilities.join('\u0000') !== parsed.capabilities.join('\u0000')
+        if (changed) await api.registerAgent(parsed)
       }
       for (const agent of get().snapshot.agents) {
         if (!seen.has(agent.id)) await api.unregisterAgent(agent.id)
@@ -241,14 +251,13 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
         attachments: [],
         context: EMPTY_CONTEXT,
       })
-      await emit(state.engine, run.id, null, 'run.planning', {})
       set((current) => ({
         messages: [
           ...current.messages,
           {
             id: newId('msg'),
             role: 'orchestrator',
-            text: `Run ${run.id} created. Open Orchestration to assign a coordinator agent, review the plan, then execute.`,
+            text: `Run ${run.id} dibuat. Pilih coordinator agent, lalu klik Buat rencana.`,
             timestamp: timestamp(),
           },
         ],
@@ -259,35 +268,26 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     }
   },
 
-  approveAndExecute: async () => {
+  generatePlan: async (runId) => {
     const state = get()
-    const run = state.snapshot.runs.find((item) => item.id === state.activeRunId)
+    const targetId = runId ?? state.activeRunId
+    const run = state.snapshot.runs.find((item) => item.id === targetId)
     if (!run) {
       set({ error: 'No active run' })
       return
     }
-    if (!run.plan) {
-      set({ error: 'Plan is not ready' })
-      return
-    }
-    const coordinator = state.snapshot.agents[0]
+    const coordinator =
+      state.snapshot.agents.find((agent) => agent.id === run.coordinatorId) ??
+      state.snapshot.agents.find((agent) => agent.status === 'idle') ??
+      state.snapshot.agents[0]
     if (!coordinator) {
-      set({ error: 'No eligible agent is available' })
+      set({ error: 'Pilih atau jalankan Agent CLI terlebih dahulu' })
       return
     }
     set({ busy: true, error: null })
     try {
-      let next = run
-      if (run.state === 'draft' || run.state === 'planning') {
-        next = await planRun(state.engine, run, coordinator.id)
-      }
-      const snapshotAfterPlan = await state.engine.snapshot()
-      const tasks = snapshotAfterPlan.tasks.filter((task) => task.runId === next.id)
-      if (tasks.length === 0) throw new Error('Planner produced no tasks')
-      await prepareWorkspaces(state.engine, next, tasks)
-      await executeRun(state.engine, next.id)
+      const planned = await planRun(state.engine, run, coordinator.id)
       const snapshot = await state.engine.snapshot()
-      const finalRun = snapshot.runs.find((item) => item.id === next.id)
       set({
         snapshot,
         busy: false,
@@ -296,7 +296,58 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           {
             id: newId('msg'),
             role: 'orchestrator',
-            text: `Run ${next.id} finished with state ${finalRun?.state ?? 'unknown'}.`,
+            text: `Rencana siap: ${planned.plan?.tasks.length ?? 0} task dari ${coordinator.label}. Review lalu klik Approve & run.`,
+            timestamp: timestamp(),
+          },
+        ],
+      })
+    } catch (error) {
+      set({ busy: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  },
+
+  setCoordinator: async (agentId) => {
+    if (!agentId) return
+    const state = get()
+    const run = state.snapshot.runs.find((item) => item.id === state.activeRunId)
+    if (!run) return
+    await api.putRun({ ...run, coordinatorId: agentId, updatedAt: timestamp() })
+    set({ snapshot: await state.engine.snapshot(), error: null })
+  },
+
+  approveAndExecute: async () => {
+    const state = get()
+    const run = state.snapshot.runs.find((item) => item.id === state.activeRunId)
+    if (!run) {
+      set({ error: 'No active run' })
+      return
+    }
+    if (!run.plan) {
+      set({ error: 'Buat rencana terlebih dahulu' })
+      return
+    }
+    if (state.snapshot.agents.length === 0) {
+      set({ error: 'No eligible agent is available' })
+      return
+    }
+    set({ busy: true, error: null })
+    try {
+      const snapshotAfterPlan = await state.engine.snapshot()
+      const tasks = snapshotAfterPlan.tasks.filter((task) => task.runId === run.id)
+      if (tasks.length === 0) throw new Error('Planner produced no tasks')
+      await prepareWorkspaces(state.engine, run, tasks)
+      await executeRun(state.engine, run.id)
+      const snapshot = await state.engine.snapshot()
+      const finalRun = snapshot.runs.find((item) => item.id === run.id)
+      set({
+        snapshot,
+        busy: false,
+        messages: [
+          ...get().messages,
+          {
+            id: newId('msg'),
+            role: 'orchestrator',
+            text: `Run ${run.id} selesai dengan state ${finalRun?.state ?? 'unknown'}.`,
             timestamp: timestamp(),
           },
         ],

@@ -209,6 +209,7 @@ export const Run = z.object({
   request: z.string(),
   projectRoot: z.string(),
   state: RunState,
+  coordinatorId: z.string().nullable().default(null),
   plan: Plan.nullable().default(null),
   settings: RunSettings,
   context: BrowserContext.default({ page: null, element: null }),

@@ -93,6 +93,7 @@ export async function createRun(
     request,
     projectRoot,
     state: 'draft',
+    coordinatorId: null,
     plan: null,
     settings: {
       maxConcurrentAgents: 2,
@@ -115,7 +116,7 @@ export async function planRun(
   run: RunValue,
   sessionId: string
 ): Promise<RunValue> {
-  const planning = await setState(ctx, run, 'planning')
+  const planning = await setState(ctx, { ...run, coordinatorId: sessionId }, 'planning')
   const dir = await ctx.runDir(planning.id)
   const { plan } = await generatePlan(planning, planning.context, sessionId, dir, {
     sendPrompt: ctx.sendPrompt,
@@ -144,7 +145,13 @@ export async function planRun(
     })
   )
   for (const task of tasks) await ctx.putTask(task)
-  const planned: RunValue = { ...planning, plan, updatedAt: now() }
+  const planned: RunValue = {
+    ...planning,
+    plan,
+    state: 'plan_ready',
+    coordinatorId: sessionId,
+    updatedAt: now(),
+  }
   await ctx.putRun(planned)
   await emit(ctx, planned.id, null, 'run.plan_ready', { taskCount: tasks.length })
   return planned

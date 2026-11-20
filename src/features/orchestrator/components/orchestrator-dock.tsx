@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useOrchestratorStore } from '../store'
 
 function stateVariant(state: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-  if (['completed', 'ready', 'idle'].includes(state)) return 'default'
+  if (['completed', 'ready', 'plan_ready', 'idle'].includes(state)) return 'default'
   if (['failed', 'conflict', 'cancelled', 'unavailable'].includes(state)) return 'destructive'
   if (['running', 'busy', 'validating', 'executing'].includes(state)) return 'secondary'
   return 'outline'
@@ -51,6 +51,8 @@ export function OrchestratorDock() {
     [snapshot.tasks, activeRunId]
   )
   const sendChat = useOrchestratorStore((state) => state.sendChat)
+  const generatePlan = useOrchestratorStore((state) => state.generatePlan)
+  const setCoordinator = useOrchestratorStore((state) => state.setCoordinator)
   const approveAndExecute = useOrchestratorStore((state) => state.approveAndExecute)
   const cancelRun = useOrchestratorStore((state) => state.cancelRun)
   const retryTask = useOrchestratorStore((state) => state.retryTask)
@@ -137,10 +139,21 @@ export function OrchestratorDock() {
               <div className='flex items-center justify-between gap-2'>
                 <span className='truncate text-xs font-medium'>{run.id}</span>
                 <div className='flex shrink-0 gap-1'>
+                  {!run.plan && (
+                    <Button
+                      type='button'
+                      size='sm'
+                      disabled={busy || snapshot.agents.length === 0}
+                      onClick={() => void generatePlan(run.id)}
+                      className='h-6 px-2 text-[10px]'
+                    >
+                      Buat rencana
+                    </Button>
+                  )}
                   <Button
                     type='button'
                     size='sm'
-                    disabled={busy}
+                    disabled={busy || !run.plan}
                     onClick={() => void approveAndExecute()}
                     className='h-6 px-2 text-[10px]'
                   >
@@ -159,9 +172,41 @@ export function OrchestratorDock() {
                   </Button>
                 </div>
               </div>
+              <label className='mt-2 block'>
+                <span className='text-[10px] font-semibold text-muted-foreground'>
+                  Coordinator
+                </span>
+                <select
+                  aria-label='Coordinator agent'
+                  value={run.coordinatorId ?? ''}
+                  disabled={busy}
+                  onChange={(event) => void setCoordinator(event.target.value)}
+                  className='mt-1 h-7 w-full rounded-md border border-input bg-background px-2 text-[10px]'
+                >
+                  <option value=''>Pilih coordinator…</option>
+                  {snapshot.agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.label} · {AGENT_STATUS_LABEL[agent.status] ?? agent.status}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <p className='mt-2 text-[11px] text-muted-foreground'>
                 {run.request}
               </p>
+              {run.plan && (
+                <div className='mt-2 rounded border bg-muted/30 p-2 text-[10px]'>
+                  <p className='font-semibold'>Rencana siap</p>
+                  {run.plan.rationale && (
+                    <p className='mt-1 text-muted-foreground'>{run.plan.rationale}</p>
+                  )}
+                  {run.plan.risks.length > 0 && (
+                    <p className='mt-1 text-muted-foreground'>
+                      Risiko: {run.plan.risks.join(', ')}
+                    </p>
+                  )}
+                </div>
+              )}
               <div className='mt-2 flex flex-wrap gap-1'>
                 <Badge variant='outline'>{tasks.length} tasks</Badge>
                 <Badge variant='outline'>

@@ -227,6 +227,18 @@ function positions(weights: number[]) {
   })]
 }
 
+function nextAgentTitle(
+  tabs: Array<{ agentId?: string; title: string }>,
+  base: string,
+  agentId: string
+) {
+  const sameAgent = tabs.filter((tab) => tab.agentId === agentId)
+  if (sameAgent.length === 0) return base
+  let index = sameAgent.length + 1
+  while (sameAgent.some((tab) => tab.title === `${base}${index}`)) index += 1
+  return `${base}${index}`
+}
+
 export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   const tabs = useTerminalStore((state) => state.tabs)
   const activeId = useTerminalStore((state) => state.activeId)
@@ -400,8 +412,12 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   }, [tabs, agentStore, syncAgents])
 
   const newTab = useCallback((command?: string, title?: string, agentId?: string) => {
+    const resolvedTitle =
+      agentId && title
+        ? nextAgentTitle(useTerminalStore.getState().tabs, title, agentId)
+        : title
     const id = add(shell, {
-      title,
+      title: resolvedTitle,
       cwd: agentStore?.projectPath ?? undefined,
       command,
       agentId,
