@@ -1,7 +1,12 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
-use sysinfo::{Pid, ProcessesToUpdate, System};
+use std::sync::{Mutex, OnceLock};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+/// One long-lived `System` is reused for every sample, so each refresh only
+/// touches memory counters instead of rebuilding the whole process table.
+static MONITOR: OnceLock<Mutex<System>> = OnceLock::new();
 
 #[cfg(windows)]
 use winapi::shared::minwindef::DWORD;
@@ -58,7 +63,7 @@ fn percent(part: u64, total: u64) -> f64 {
     }
 }
 
-fn physical_memory() -> (u64, u64, u64) {
+fn physical_memory(system: &mut System) -> (u64, u64, u64) {
     #[cfg(windows)]
     unsafe {
         let mut status: MEMORYSTATUSEX = std::mem::zeroed();
@@ -71,10 +76,9 @@ fn physical_memory() -> (u64, u64, u64) {
         }
     }
 
-    let mut sys = System::new();
-    sys.refresh_memory();
-    let total = sys.total_memory();
-    let available = sys.available_memory();
+    system.refresh_memory();
+    let total = system.total_memory();
+    let available = system.available_memory();
     let used = total.saturating_sub(available);
     (total, used, available)
 }
@@ -111,10 +115,14 @@ fn collect_descendants(system: &System, root: Pid) -> Vec<Pid> {
 #[tauri::command]
 pub async fn system_memory_snapshot() -> Result<SystemMemorySnapshot, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let (total_bytes, used_bytes, available_bytes) = physical_memory();
-
-        let mut system = System::new();
-        system.refresh_processes(ProcessesToUpdate::All, true);
+        let monitor = MONITOR.get_or_init(|| Mutex::new(System::new()));
+        let mut system = monitor.lock().map_err(|error| error.to_string())?;
+        let (total_bytes, used_bytes, available_bytes) = physical_memory(&mut system);
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing().with_memory(),
+        );
         let root_pid = Pid::from_u32(std::process::id());
         let mut pids = collect_descendants(&system, root_pid);
         if !pids.iter().any(|pid| pid.as_u32() == root_pid.as_u32()) {

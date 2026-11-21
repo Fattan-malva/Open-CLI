@@ -8,10 +8,8 @@ type Handler<T> = (value: T) => void
 
 const dataHandlers = new Map<string, Set<Handler<Uint8Array>>>()
 const exitHandlers = new Map<string, Set<Handler<void>>>()
-const suspendHandlers = new Map<string, Set<Handler<void>>>()
 const pendingData = new Map<string, Uint8Array[]>()
 const pendingExits = new Set<string>()
-const pendingSuspends = new Set<string>()
 const MAX_PENDING_BYTES = 256 * 1024
 let listenersReady: Promise<void> | null = null
 let dataFrame = 0
@@ -72,11 +70,6 @@ async function ensureListeners() {
       if (handlers) handlers.forEach((handler) => handler())
       else pendingExits.add(payload.id)
     }),
-    listen<PtyEvent>('pty:suspended', ({ payload }) => {
-      const handlers = suspendHandlers.get(payload.id)
-      if (handlers) handlers.forEach((handler) => handler())
-      else pendingSuspends.add(payload.id)
-    }),
   ]).then(() => undefined)
 
   return listenersReady
@@ -103,13 +96,6 @@ export async function onPtyExit(id: string, handler: Handler<void>) {
   await ensureListeners()
   const unregister = register(exitHandlers, id, handler)
   if (pendingExits.delete(id)) handler()
-  return unregister
-}
-
-export async function onPtySuspended(id: string, handler: Handler<void>) {
-  await ensureListeners()
-  const unregister = register(suspendHandlers, id, handler)
-  if (pendingSuspends.delete(id)) handler()
   return unregister
 }
 
@@ -152,22 +138,3 @@ export function ptyIsBusy(id: string) {
   return invoke<boolean>('pty_is_busy', { id })
 }
 
-export function ptySetActive(id: string, active: boolean) {
-  if (!isDesktop) return Promise.resolve()
-  return invoke<void>('pty_set_active', { id, active })
-}
-
-export function ptyIdleSessions(idleAfterMs: number) {
-  if (!isDesktop) return Promise.resolve([] as string[])
-  return invoke<string[]>('pty_idle_sessions', { idleAfterMs })
-}
-
-export function ptySuspend(id: string) {
-  if (!isDesktop) return Promise.resolve(false)
-  return invoke<boolean>('pty_suspend', { id })
-}
-
-export function systemMemoryAvailablePercent() {
-  if (!isDesktop) return Promise.resolve(100)
-  return invoke<number>('system_memory_available_percent')
-}

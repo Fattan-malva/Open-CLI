@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   BROWSER_DATA_CLEARED_EVENT,
-  closeBrowserTab,
   createBrowserTab,
   navigateBrowserTab,
   repaintBrowserTab,
@@ -188,15 +187,6 @@ export function useBrainstormPane({
       if (settleTimer.current !== null) window.clearTimeout(settleTimer.current)
     }
   }, [scheduleSync])
-
-  // Release the native webview when the screen is left so it stops consuming memory.
-  useEffect(() => {
-    if (visible || !created.current) return
-    created.current = false
-    currentUrl.current = null
-    lastSyncKey.current = null
-    void closeBrowserTab(label).catch(() => undefined)
-  }, [visible, label])
 
   const navigate = useCallback(
     async (target: string) => {

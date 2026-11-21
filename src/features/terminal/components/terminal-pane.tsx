@@ -8,10 +8,8 @@ import { isDesktop } from '@/lib/platform'
 import {
   onPtyData,
   onPtyExit,
-  onPtySuspended,
   ptyEnsure,
   ptyResize,
-  ptySetActive,
   ptyWrite,
 } from '@/lib/pty'
 import type { TerminalTab } from '../store'
@@ -123,8 +121,7 @@ export const TerminalPane = memo(function TerminalPane({
   useEffect(() => {
     if (!isDesktop || !sessionReady) return
     if (active && visible) void ensureSession().catch(() => undefined)
-    void ptySetActive(tab.id, active && visible).catch(() => undefined)
-  }, [active, visible, sessionReady, tab.id, ensureSession])
+  }, [active, visible, sessionReady, ensureSession])
 
   useEffect(() => {
     if (!editing) return
@@ -253,7 +250,7 @@ export const TerminalPane = memo(function TerminalPane({
         return
       }
 
-      const [offData, offExit, offSuspended] = await Promise.all([
+      const [offData, offExit] = await Promise.all([
         onPtyData(tab.id, (data) => {
           if (disposed) return
           if (exitedRef.current) {
@@ -266,17 +263,13 @@ export const TerminalPane = memo(function TerminalPane({
           exitedRef.current = true
           if (!disposed) setExited(true)
         }),
-        onPtySuspended(tab.id, () => {
-          inputBufferRef.current = ''
-        }),
       ])
       if (disposed) {
         offData()
         offExit()
-        offSuspended()
         return
       }
-      cleanups.push(offData, offExit, offSuspended)
+      cleanups.push(offData, offExit)
 
       const offInput = term.onData(queueInput)
       const offBinary = term.onBinary((data) => queueInput(data))

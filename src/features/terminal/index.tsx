@@ -48,11 +48,8 @@ import {
 import { cn } from '@/lib/utils'
 import { isDesktop } from '@/lib/platform'
 import {
-  ptyIdleSessions,
   ptyIsBusy,
   ptyKill,
-  ptySuspend,
-  systemMemoryAvailablePercent,
 } from '@/lib/pty'
 import {
   loadAgentCliStore,
@@ -64,11 +61,7 @@ import { ShortcutKeys } from '@/features/agent-cli/components/shortcut-keys'
 import { BrowserWorkspace } from '@/features/browser'
 import { OrchestratorModeSwitch } from '@/features/orchestrator/components/mode-switch'
 import { OrchestratorDock } from '@/features/orchestrator/components/orchestrator-dock'
-import {
-  ACTIVE_TASK_STATUSES,
-  useOrchestratorStore,
-} from '@/features/orchestrator/store'
-import { idleSuspendAfterMs, shouldSuspendSession } from './governor'
+import { useOrchestratorStore } from '@/features/orchestrator/store'
 import { ProjectPickerDialog } from './components/project-picker-dialog'
 import { TerminalPane } from './components/terminal-pane'
 import { useTerminalStore } from './store'
@@ -447,55 +440,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
       ...(agentStore?.customAgents ?? []),
     ])
   }, [tabs, agentStore, syncAgents])
-
-  useEffect(() => {
-    if (!isDesktop) return
-    let cancelled = false
-    const run = async () => {
-      try {
-        const available = await systemMemoryAvailablePercent()
-        const idleAfterMs = idleSuspendAfterMs(available)
-        const idle = await ptyIdleSessions(idleAfterMs)
-        if (cancelled || idle.length === 0) return
-        const orchestrator = useOrchestratorStore.getState()
-        const activeOwners = new Set(
-          orchestrator.snapshot.tasks
-            .filter(
-              (task) =>
-                ACTIVE_TASK_STATUSES.has(task.status) && task.ownerSessionId
-            )
-            .map((task) => task.ownerSessionId as string)
-        )
-        const grantedAgents = new Set(orchestrator.grants.map((grant) => grant.agentId))
-        const currentTabs = useTerminalStore.getState().tabs
-        for (const id of idle) {
-          if (cancelled) return
-          const busy = await ptyIsBusy(id).catch(() => true)
-          if (
-            !shouldSuspendSession({
-              id,
-              activeId: useTerminalStore.getState().activeId,
-              hasTab: currentTabs.some((tab) => tab.id === id),
-              hasActiveTask: activeOwners.has(id),
-              hasBridgeGrant: grantedAgents.has(id),
-              busy,
-            })
-          ) {
-            continue
-          }
-          await ptySuspend(id).catch(() => false)
-        }
-      } catch {
-        return
-      }
-    }
-    const timer = window.setInterval(() => void run(), 5_000)
-    void run()
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [])
 
   const handleActivate = useCallback((id: string) => setActive(id), [setActive])
 

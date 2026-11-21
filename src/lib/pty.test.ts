@@ -7,16 +7,11 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('./platform', () => ({ isDesktop: true }))
 
 import { invoke } from '@tauri-apps/api/core'
-import {
-  ptyEnsure,
-  ptySetActive,
-  ptySuspend,
-  systemMemoryAvailablePercent,
-} from './pty'
+import { ptyEnsure } from './pty'
 
 const mockedInvoke = vi.mocked(invoke)
 
-describe('pty performance commands', () => {
+describe('pty commands', () => {
   beforeEach(() => {
     mockedInvoke.mockReset()
   })
@@ -31,17 +26,5 @@ describe('pty performance commands', () => {
       shell: 'powershell.exe',
       cwd: 'C:/repo',
     })
-
-    await ptySetActive('pty-1', false)
-    expect(mockedInvoke).toHaveBeenCalledWith('pty_set_active', {
-      id: 'pty-1',
-      active: false,
-    })
-  })
-
-  it('exposes suspend and memory probes', async () => {
-    mockedInvoke.mockResolvedValueOnce(true).mockResolvedValueOnce(42)
-    await expect(ptySuspend('pty-1')).resolves.toBe(true)
-    await expect(systemMemoryAvailablePercent()).resolves.toBe(42)
   })
 })

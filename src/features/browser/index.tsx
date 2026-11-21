@@ -55,17 +55,12 @@ type BrowserTab = {
   label: string
   url: string
   title: string
-  discarded?: boolean
 }
 
 type BrowserTitlePayload = {
   label: string
   title: string
 }
-
-// Background tabs beyond this count release their native webview and keep their URL,
-// so memory stays bounded while every tab remains one click away.
-const MAX_LIVE_TABS = 3
 
 type BrowserBookmark = {
   id: string
@@ -189,7 +184,6 @@ export function BrowserWorkspace({
   const viewportRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const pendingTitles = useRef(new Map<string, string>())
-  const lastUsedRef = useRef(new Map<string, number>())
   const latestRef = useRef({
     visible,
     activeLabel: null as string | null,
@@ -315,7 +309,7 @@ export function BrowserWorkspace({
   )
 
   const reload = useCallback(async () => {
-    if (!activeTab?.url || activeTab.discarded) return
+    if (!activeTab?.url) return
     try {
       await navigateBrowserTab(activeTab.label, activeTab.url)
     } catch (error) {
@@ -845,57 +839,6 @@ export function BrowserWorkspace({
     window.addEventListener(BROWSER_DATA_CLEARED_EVENT, reset)
     return () => window.removeEventListener(BROWSER_DATA_CLEARED_EVENT, reset)
   }, [])
-
-  // Keep at most MAX_LIVE_TABS webviews alive: discard the least recently used background tab.
-  useEffect(() => {
-    if (activeId) lastUsedRef.current.set(activeId, Date.now())
-    const live = tabs.filter((tab) => tab.url && !tab.discarded)
-    const excess = live.length - MAX_LIVE_TABS
-    if (excess <= 0) return
-
-    const victims = live
-      .filter((tab) => tab.id !== activeId)
-      .sort(
-        (left, right) =>
-          (lastUsedRef.current.get(left.id) ?? 0) -
-          (lastUsedRef.current.get(right.id) ?? 0)
-      )
-      .slice(0, excess)
-    if (victims.length === 0) return
-
-    const discardIds = new Set(victims.map((tab) => tab.id))
-    for (const tab of victims) {
-      void closeBrowserTab(tab.label).catch(() => undefined)
-    }
-    setTabs((previous) =>
-      previous.map((tab) =>
-        discardIds.has(tab.id) ? { ...tab, discarded: true } : tab
-      )
-    )
-  }, [activeId, tabs])
-
-  // Re-create the webview of a discarded tab when it becomes active again.
-  const restoreId = activeTab?.discarded ? activeTab.id : null
-  const restoreLabel = activeTab?.label ?? ''
-  const restoreUrl = activeTab?.url ?? ''
-  useEffect(() => {
-    if (!isDesktop || !restoreId || !restoreUrl) return
-    let cancelled = false
-    void createBrowserTab(restoreLabel, restoreUrl, getBounds())
-      .then(() => {
-        if (cancelled) return
-        setTabs((previous) =>
-          previous.map((tab) => (tab.id === restoreId ? { ...tab, discarded: false } : tab))
-        )
-      })
-      .catch((error) => {
-        if (cancelled) return
-        toast.error(error instanceof Error ? error.message : 'Gagal memuat tab.')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [restoreId, restoreLabel, restoreUrl, getBounds])
 
   useEffect(() => {
     latestRef.current = {

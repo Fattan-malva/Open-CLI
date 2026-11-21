@@ -3,9 +3,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 mod orchestrator;
 mod system_monitor;
@@ -71,13 +70,6 @@ const PTY_READ_BUFFER: usize = 16 * 1024;
 const MAX_CONCURRENT_PTY_SPAWNS: usize = 2;
 const IDE_MAX_READ_BYTES: u64 = 2 * 1024 * 1024;
 const IDE_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|value| value.as_millis() as u64)
-        .unwrap_or(0)
-}
 
 static PTY_SPAWN_ACTIVE: OnceLock<Mutex<usize>> = OnceLock::new();
 static PTY_SPAWN_CONDVAR: OnceLock<Condvar> = OnceLock::new();
@@ -248,7 +240,6 @@ struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
-    last_output: Arc<AtomicU64>,
     #[cfg(windows)]
     job: Option<JobHandle>,
 }
@@ -278,7 +269,6 @@ pub(crate) fn pty_write_session(state: &PtyState, id: &str, data: &str) -> Resul
         .write_all(data.as_bytes())
         .and_then(|_| session.writer.flush())
         .map_err(|error| error.to_string())?;
-    session.last_output.store(now_millis(), Ordering::Relaxed);
     Ok(())
 }
 
@@ -462,7 +452,6 @@ fn spawn_pty_session(
 
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-        let last_output = Arc::new(AtomicU64::new(now_millis()));
 
         state.sessions.lock().unwrap().insert(
             id.to_string(),
@@ -470,7 +459,6 @@ fn spawn_pty_session(
                 writer,
                 master: pair.master,
                 child,
-                last_output: last_output.clone(),
                 #[cfg(windows)]
                 job,
             },
@@ -500,7 +488,6 @@ fn spawn_pty_session(
                         for byte in buf[..n].iter().copied().filter(|byte| *byte != 7) {
                             pending.push(byte);
                         }
-                        last_output.store(now_millis(), Ordering::Relaxed);
                         let elapsed = last_flush.elapsed().as_millis();
                         if pending.len() >= PTY_FLUSH_BYTES || elapsed >= PTY_FLUSH_INTERVAL_MS {
                             if !pending.is_empty() {
@@ -702,82 +689,6 @@ async fn pty_kill(
     })
     .await
     .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn pty_set_active(
-    state: State<'_, PtyState>,
-    id: String,
-    active: bool,
-) -> Result<(), String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
-        let Some(session) = sessions.get(&id) else {
-            return Ok(());
-        };
-        if active {
-            session.last_output.store(now_millis(), Ordering::Relaxed);
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn pty_idle_sessions(
-    state: State<'_, PtyState>,
-    idle_after_ms: u64,
-) -> Result<Vec<String>, String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let now = now_millis();
-        let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
-        Ok(sessions
-            .iter()
-            .filter(|(_, session)| {
-                now.saturating_sub(session.last_output.load(Ordering::Relaxed)) >= idle_after_ms
-            })
-            .map(|(id, _)| id.clone())
-            .collect())
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn pty_suspend(
-    app: AppHandle,
-    state: State<'_, PtyState>,
-    id: String,
-) -> Result<bool, String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        state.cancel_pending_spawn(&id);
-        let mut sessions = state.sessions.lock().map_err(|error| error.to_string())?;
-        if let Some(mut session) = sessions.remove(&id) {
-            terminate_tree(&mut session);
-            emit(&app, "pty:suspended", &id, String::new());
-            return Ok(true);
-        }
-        Ok(false)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-fn system_memory_available_percent() -> Result<f64, String> {
-    #[cfg(windows)]
-    unsafe {
-        let mut status: MEMORYSTATUSEX = std::mem::zeroed();
-        status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
-        if GlobalMemoryStatusEx(&mut status) != 0 && status.ullTotalPhys > 0 {
-            return Ok((status.ullAvailPhys as f64 / status.ullTotalPhys as f64) * 100.0);
-        }
-    }
-    Ok(100.0)
 }
 
 fn kill_all(state: &PtyState) {
@@ -1542,10 +1453,6 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_is_busy,
-            pty_set_active,
-            pty_idle_sessions,
-            pty_suspend,
-            system_memory_available_percent,
             system_monitor::system_memory_snapshot,
             pty_kill,
             browser_tab_create,
