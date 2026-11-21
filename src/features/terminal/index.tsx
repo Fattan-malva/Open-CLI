@@ -68,7 +68,7 @@ import {
   ACTIVE_TASK_STATUSES,
   useOrchestratorStore,
 } from '@/features/orchestrator/store'
-import { shouldSuspendSession } from './governor'
+import { idleSuspendAfterMs, shouldSuspendSession } from './governor'
 import { ProjectPickerDialog } from './components/project-picker-dialog'
 import { TerminalPane } from './components/terminal-pane'
 import { useTerminalStore } from './store'
@@ -454,7 +454,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     const run = async () => {
       try {
         const available = await systemMemoryAvailablePercent()
-        const idleAfterMs = available < 20 ? 60_000 : 10 * 60_000
+        const idleAfterMs = idleSuspendAfterMs(available)
         const idle = await ptyIdleSessions(idleAfterMs)
         if (cancelled || idle.length === 0) return
         const orchestrator = useOrchestratorStore.getState()

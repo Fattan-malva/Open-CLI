@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { useSidebar } from '@/components/ui/sidebar'
 import {
   BROWSER_DATA_CLEARED_EVENT,
+  closeBrowserTab,
   createBrowserTab,
   navigateBrowserTab,
   syncBrowserTabs,
@@ -130,6 +131,15 @@ export function SocialWorkspace({ site }: SocialWorkspaceProps) {
       cancelled = true
     }
   }, [label, config, getBounds])
+
+  // Keep only the webview of the open site; release the rest so they stop using memory.
+  useEffect(() => {
+    for (const created of Array.from(createdLabels.current)) {
+      if (created === label) continue
+      createdLabels.current.delete(created)
+      void closeBrowserTab(created).catch(() => undefined)
+    }
+  }, [label])
 
   useEffect(() => {
     sync()

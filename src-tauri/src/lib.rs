@@ -260,6 +260,16 @@ pub(crate) struct PtyState {
     cancelled: Arc<Mutex<HashSet<String>>>,
 }
 
+impl PtyState {
+    /// Records a cancel only while a spawn for `id` is in flight, so a stale
+    /// kill/suspend can never make a later spawn for the same id a silent no-op.
+    fn cancel_pending_spawn(&self, id: &str) {
+        if self.starting.lock().unwrap().contains(id) {
+            self.cancelled.lock().unwrap().insert(id.to_string());
+        }
+    }
+}
+
 pub(crate) fn pty_write_session(state: &PtyState, id: &str, data: &str) -> Result<(), String> {
     let mut sessions = state.sessions.lock().unwrap();
     let session = sessions.get_mut(id).ok_or("session not found")?;
@@ -384,22 +394,22 @@ fn spawn_pty_session(
     cwd: Option<String>,
     initial_command: Option<&str>,
 ) -> Result<(), String> {
+    // A fresh spawn request supersedes any kill/suspend issued before it.
+    state.cancelled.lock().unwrap().remove(id);
     {
         let mut starting = state.starting.lock().unwrap();
-        if !starting.insert(id.to_string()) {
-            return Ok(());
-        }
-        if state.sessions.lock().unwrap().contains_key(id) {
-            starting.remove(id);
+        if state.sessions.lock().unwrap().contains_key(id) || !starting.insert(id.to_string()) {
             return Ok(());
         }
     }
+    // Releases the `starting` marker on every exit path, including early returns.
+    let _starting = StartingGuard { state, id };
 
     let _spawn_slot = PtySpawnSlot::acquire();
     if state.cancelled.lock().unwrap().remove(id) {
         return Ok(());
     }
-    let result = (|| -> Result<(), String> {
+    (|| -> Result<(), String> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -510,9 +520,18 @@ fn spawn_pty_session(
         });
 
         Ok(())
-    })();
-    state.starting.lock().unwrap().remove(id);
-    result
+    })()
+}
+
+struct StartingGuard<'a> {
+    state: &'a PtyState,
+    id: &'a str,
+}
+
+impl Drop for StartingGuard<'_> {
+    fn drop(&mut self) {
+        self.state.starting.lock().unwrap().remove(self.id);
+    }
 }
 
 #[tauri::command]
@@ -673,11 +692,7 @@ async fn pty_kill(
 ) -> Result<(), String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        state
-            .cancelled
-            .lock()
-            .map_err(|error| error.to_string())?
-            .insert(id.clone());
+        state.cancel_pending_spawn(&id);
         let mut sessions = state.sessions.lock().map_err(|error| error.to_string())?;
         if let Some(mut session) = sessions.remove(&id) {
             terminate_tree(&mut session);
@@ -739,11 +754,7 @@ async fn pty_suspend(
 ) -> Result<bool, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        state
-            .cancelled
-            .lock()
-            .map_err(|error| error.to_string())?
-            .insert(id.clone());
+        state.cancel_pending_spawn(&id);
         let mut sessions = state.sessions.lock().map_err(|error| error.to_string())?;
         if let Some(mut session) = sessions.remove(&id) {
             terminate_tree(&mut session);
@@ -882,75 +893,6 @@ fn browser_bounds(x: f64, y: f64, width: f64, height: f64) -> Rect {
 }
 
 #[tauri::command]
-async fn browser_open(
-    app: AppHandle,
-    url: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        if let Some(webview) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
-            let target = tauri::Url::parse(&url).map_err(|error| error.to_string())?;
-            webview
-                .set_bounds(browser_bounds(x, y, width, height))
-                .map_err(|error| error.to_string())?;
-            webview
-                .navigate(target)
-                .map_err(|error| error.to_string())?;
-            webview.show().map_err(|error| error.to_string())?;
-            webview.set_focus().map_err(|error| error.to_string())?;
-            return Ok(());
-        }
-
-        let window = app
-            .get_window("main")
-            .ok_or_else(|| "jendela utama tidak ditemukan".to_string())?;
-        let target = tauri::Url::parse(&url).map_err(|error| error.to_string())?;
-
-        window
-            .add_child(
-                tauri::webview::WebviewBuilder::new(
-                    BROWSER_WEBVIEW_LABEL,
-                    WebviewUrl::External(target),
-                ),
-                LogicalPosition::new(x, y),
-                LogicalSize::new(width, height),
-            )
-            .map_err(|error| error.to_string())?;
-
-        Ok(())
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn browser_set_bounds(
-    app: AppHandle,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
-    if let Some(webview) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
-        webview
-            .set_bounds(browser_bounds(x, y, width, height))
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn browser_close(app: AppHandle) -> Result<(), String> {
-    if let Some(webview) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
-        webview.close().map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
 async fn browser_tab_create(
     app: AppHandle,
     label: String,
@@ -1008,8 +950,6 @@ async fn browser_tab_navigate(app: AppHandle, label: String, url: String) -> Res
         webview
             .navigate(target)
             .map_err(|error| error.to_string())?;
-        webview.show().map_err(|error| error.to_string())?;
-        webview.set_focus().map_err(|error| error.to_string())?;
 
         Ok(())
     })
@@ -1017,34 +957,42 @@ async fn browser_tab_navigate(app: AppHandle, label: String, url: String) -> Res
     .map_err(|error| error.to_string())?
 }
 
-#[tauri::command]
-async fn browser_tab_sync(
-    app: AppHandle,
-    labels: Vec<String>,
-    active: Option<String>,
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserView {
+    label: String,
+    visible: bool,
     x: f64,
     y: f64,
     width: f64,
     height: f64,
-) -> Result<(), String> {
-    let bounds = move || browser_bounds(x, y, width, height);
+}
 
+/// Applies the visibility and bounds of every known tab webview in one call.
+/// Each label is shown or hidden independently, so panes can be visible at once.
+#[tauri::command]
+async fn browser_tabs_apply(
+    app: AppHandle,
+    views: Vec<BrowserView>,
+    focus: Option<String>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        for label in labels {
-            let Some(webview) = app.get_webview(&label) else {
+        for view in views {
+            let Some(webview) = app.get_webview(&view.label) else {
                 continue;
             };
-            if active.as_ref() == Some(&label) {
-                webview
-                    .set_bounds(bounds())
-                    .map_err(|error| error.to_string())?;
-                webview.show().map_err(|error| error.to_string())?;
-                webview.set_focus().map_err(|error| error.to_string())?;
-            } else {
+            if !view.visible {
                 webview.hide().map_err(|error| error.to_string())?;
+                continue;
+            }
+            webview
+                .set_bounds(browser_bounds(view.x, view.y, view.width, view.height))
+                .map_err(|error| error.to_string())?;
+            webview.show().map_err(|error| error.to_string())?;
+            if focus.as_deref() == Some(view.label.as_str()) {
+                webview.set_focus().map_err(|error| error.to_string())?;
             }
         }
-
         Ok(())
     })
     .await
@@ -1091,12 +1039,6 @@ async fn browser_tab_close(app: AppHandle, label: String) -> Result<(), String> 
     Ok(())
 }
 
-#[tauri::command]
-async fn browser_tabs_close_all(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || close_browser_webviews(&app))
-        .await
-        .map_err(|error| error.to_string())?
-}
 
 fn agent_cli_path(app: &AppHandle) -> Result<PathBuf, String> {
     let root = app
@@ -1606,15 +1548,11 @@ pub fn run() {
             system_memory_available_percent,
             system_monitor::system_memory_snapshot,
             pty_kill,
-            browser_open,
-            browser_set_bounds,
-            browser_close,
             browser_tab_create,
             browser_tab_navigate,
-            browser_tab_sync,
+            browser_tabs_apply,
             browser_tab_repaint,
             browser_tab_close,
-            browser_tabs_close_all,
             agent_cli_read,
             agent_cli_write,
             app_data_path,

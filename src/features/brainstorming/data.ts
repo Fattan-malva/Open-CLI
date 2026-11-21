@@ -6,9 +6,25 @@ export type BrainstormApp = {
   key: string
   label: string
   url: string
+  /** Page where the chat lets the user add a custom MCP connector. */
+  connectorsUrl?: string
   icon?: ComponentType<SVGProps<SVGSVGElement>>
   iconUrl?: string
 }
+
+export type McpServerPreset = {
+  key: string
+  label: string
+  url: string
+}
+
+export const BRAINSTORM_MCP_SERVERS: McpServerPreset[] = [
+  {
+    key: 'excalidraw',
+    label: 'Excalidraw',
+    url: 'https://api.excalidraw.com/api/v1/mcp',
+  },
+]
 
 export const brainstormApps: Record<string, BrainstormApp> = {
   excalidraw: {
@@ -21,12 +37,14 @@ export const brainstormApps: Record<string, BrainstormApp> = {
     key: 'chatgpt',
     label: 'ChatGPT',
     url: 'https://chatgpt.com/',
+    connectorsUrl: 'https://chatgpt.com/#settings/Connectors',
     icon: Sparkles,
   },
   claude: {
     key: 'claude',
     label: 'Claude Chat',
     url: 'https://claude.ai/',
+    connectorsUrl: 'https://claude.ai/customize/connectors',
     icon: Bot,
   },
   deepseek: {

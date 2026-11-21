@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   BROWSER_DATA_CLEARED_EVENT,
+  closeBrowserTab,
   createBrowserTab,
   navigateBrowserTab,
   repaintBrowserTab,
@@ -188,16 +189,30 @@ export function useBrainstormPane({
     }
   }, [scheduleSync])
 
-  const reload = useCallback(async () => {
-    if (!isDesktop || !created.current || !url) return
-    try {
-      await navigateBrowserTab(label, url)
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : 'Gagal memuat ulang halaman.'
-      )
-    }
-  }, [label, url])
+  // Release the native webview when the screen is left so it stops consuming memory.
+  useEffect(() => {
+    if (visible || !created.current) return
+    created.current = false
+    currentUrl.current = null
+    lastSyncKey.current = null
+    void closeBrowserTab(label).catch(() => undefined)
+  }, [visible, label])
 
-  return { viewportRef, reload }
+  const navigate = useCallback(
+    async (target: string) => {
+      if (!isDesktop || !created.current) return
+      try {
+        await navigateBrowserTab(label, target)
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : 'Gagal membuka halaman.'
+        )
+      }
+    },
+    [label]
+  )
+
+  const reload = useCallback(() => navigate(url), [navigate, url])
+
+  return { viewportRef, reload, navigate }
 }

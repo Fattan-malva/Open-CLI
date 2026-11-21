@@ -113,25 +113,6 @@ export async function onPtySuspended(id: string, handler: Handler<void>) {
   return unregister
 }
 
-export function ptySpawn(
-  id: string,
-  cols: number,
-  rows: number,
-  shell: string,
-  cwd?: string,
-  initialCommand?: string
-) {
-  if (!isDesktop) return Promise.resolve()
-  return invoke<void>('pty_spawn', {
-    id,
-    cols,
-    rows,
-    shell,
-    cwd,
-    ...(initialCommand ? { initialCommand } : {}),
-  })
-}
-
 export function ptyEnsure(
   id: string,
   cols: number,

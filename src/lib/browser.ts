@@ -18,26 +18,19 @@ export type BrowserBounds = {
   height: number
 }
 
-type BrowserVisibility = {
-  active: boolean
-  bounds: BrowserBounds
-}
+type BrowserView = BrowserBounds & { label: string; visible: boolean }
 
-const FALLBACK_BOUNDS: BrowserBounds = { x: 0, y: 0, width: 1, height: 1 }
-const browserVisibility = new Map<string, BrowserVisibility>()
+// Visibility is tracked per webview label, so several panes can show at once
+// (for example the two Brainstorming panes) while each owner only changes its own tabs.
+const browserViews = new Map<string, BrowserView>()
 
-function browserVisibilityPayload(fallback: BrowserBounds = FALLBACK_BOUNDS) {
-  let active: string | null = null
-  for (const [label, entry] of browserVisibility) {
-    if (entry.active) {
-      active = label
-      break
-    }
-  }
-  const bounds = active
-    ? browserVisibility.get(active)?.bounds ?? fallback
-    : fallback
-  return { labels: Array.from(browserVisibility.keys()), active, ...bounds }
+function applyBrowserViews(focus: string | null = null): Promise<void> {
+  return enqueueBrowserCommand(() =>
+    invoke('browser_tabs_apply', {
+      views: Array.from(browserViews.values()),
+      focus,
+    })
+  )
 }
 
 export function normalizeBrowserUrl(value: string): string | null {
@@ -82,46 +75,30 @@ export function resolveBrowserTarget(value: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
 }
 
-export function openEmbeddedBrowser(
-  url: string,
-  bounds: BrowserBounds
-): Promise<void> {
-  if (!isDesktop) return Promise.resolve()
-  return enqueueBrowserCommand(() => invoke('browser_open', { url, ...bounds }))
-}
-
-export function setEmbeddedBrowserBounds(bounds: BrowserBounds): Promise<void> {
-  if (!isDesktop) return Promise.resolve()
-  return enqueueBrowserCommand(() => invoke('browser_set_bounds', bounds))
-}
-
-export function closeEmbeddedBrowser(): Promise<void> {
-  if (!isDesktop) return Promise.resolve()
-  return enqueueBrowserCommand(() => invoke('browser_close'))
-}
-
 export function createBrowserTab(
   label: string,
   url: string,
   bounds: BrowserBounds
 ): Promise<void> {
   if (!isDesktop) return Promise.resolve()
-  const existing = browserVisibility.get(label)
-  browserVisibility.set(label, { active: existing?.active ?? false, bounds })
-  return enqueueBrowserCommand(async () => {
-    await invoke('browser_tab_create', { label, url, ...bounds })
-    await invoke('browser_tab_sync', browserVisibilityPayload(bounds))
-  })
+  browserViews.set(label, { label, visible: false, ...bounds })
+  return enqueueBrowserCommand(() =>
+    invoke('browser_tab_create', { label, url, ...bounds })
+  )
 }
 
 export function navigateBrowserTab(label: string, url: string): Promise<void> {
   if (!isDesktop) return Promise.resolve()
   return enqueueBrowserCommand(async () => {
     await invoke('browser_tab_navigate', { label, url })
-    await invoke('browser_tab_sync', browserVisibilityPayload())
+    await applyBrowserViews()
   })
 }
 
+/**
+ * Shows `active` (if it is one of `labels`) and hides the other labels.
+ * Labels not listed here are left untouched.
+ */
 export function syncBrowserTabs(
   labels: string[],
   active: string | null,
@@ -129,17 +106,19 @@ export function syncBrowserTabs(
 ): Promise<void> {
   if (!isDesktop) return Promise.resolve()
   for (const label of labels) {
-    browserVisibility.set(label, { active: false, bounds })
+    const current = browserViews.get(label)
+    if (!current) continue
+    const rect = label === active ? bounds : current
+    browserViews.set(label, {
+      label,
+      visible: label === active,
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+    })
   }
-  if (active && browserVisibility.has(active)) {
-    browserVisibility.get(active)!.active = true
-    for (const [label, entry] of browserVisibility) {
-      if (label !== active) entry.active = false
-    }
-  }
-  return enqueueBrowserCommand(() =>
-    invoke('browser_tab_sync', browserVisibilityPayload(bounds))
-  )
+  return applyBrowserViews(active)
 }
 
 export function repaintBrowserTab(
@@ -147,8 +126,8 @@ export function repaintBrowserTab(
   bounds: BrowserBounds
 ): Promise<void> {
   if (!isDesktop) return Promise.resolve()
-  const existing = browserVisibility.get(label)
-  browserVisibility.set(label, { active: existing?.active ?? false, bounds })
+  const current = browserViews.get(label)
+  if (current) browserViews.set(label, { ...current, ...bounds })
   return enqueueBrowserCommand(() =>
     invoke('browser_tab_repaint', { label, ...bounds })
   )
@@ -156,22 +135,11 @@ export function repaintBrowserTab(
 
 export function closeBrowserTab(label: string): Promise<void> {
   if (!isDesktop) return Promise.resolve()
-  browserVisibility.delete(label)
-  return enqueueBrowserCommand(async () => {
-    await invoke('browser_tab_close', { label })
-    await invoke('browser_tab_sync', browserVisibilityPayload())
-  })
-}
-
-export function closeAllBrowserTabs(): Promise<void> {
-  if (!isDesktop) return Promise.resolve()
-  browserVisibility.clear()
-  return enqueueBrowserCommand(async () => {
-    await invoke('browser_tabs_close_all')
-    await invoke('browser_tab_sync', browserVisibilityPayload())
-  })
+  browserViews.delete(label)
+  return enqueueBrowserCommand(() => invoke('browser_tab_close', { label }))
 }
 
 export function notifyBrowserDataCleared() {
+  browserViews.clear()
   window.dispatchEvent(new Event(BROWSER_DATA_CLEARED_EVENT))
 }

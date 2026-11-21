@@ -7,7 +7,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { Brain, GripVertical, RotateCw } from 'lucide-react'
+import { Brain, GripVertical, Plug, RotateCw } from 'lucide-react'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ import {
 import { isDesktop } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { AddBrainstormAppPopover } from './add-brainstorm-app-popover'
+import { ConnectMcpDialog } from './connect-mcp-dialog'
 import { BrainstormAppIcon } from './app-icon'
 import {
   brainstormApps,
@@ -298,7 +299,8 @@ function WorkspacePane({
   showToolbar = false,
   style,
 }: WorkspacePaneProps) {
-  const { viewportRef, reload } = useBrainstormPane({ label, app, visible })
+  const { viewportRef, reload, navigate } = useBrainstormPane({ label, app, visible })
+  const [mcpOpen, setMcpOpen] = useState(false)
 
   return (
     <div
@@ -343,6 +345,16 @@ function WorkspacePane({
           <AddBrainstormAppPopover onAdded={onAdded} />
           <Button
             type='button'
+            variant='outline'
+            size='sm'
+            onClick={() => setMcpOpen(true)}
+            className='h-8 shrink-0'
+          >
+            <Plug className='size-4' />
+            Connect MCP
+          </Button>
+          <Button
+            type='button'
             variant='ghost'
             size='icon'
             aria-label='Muat ulang'
@@ -382,6 +394,18 @@ function WorkspacePane({
           </div>
         ) : null}
       </div>
+
+      {visible && showToolbar ? (
+        <ConnectMcpDialog
+          app={app}
+          open={mcpOpen}
+          onOpenChange={setMcpOpen}
+          onOpenConnectors={(url) => {
+            setMcpOpen(false)
+            void navigate(url)
+          }}
+        />
+      ) : null}
     </div>
   )
 }
