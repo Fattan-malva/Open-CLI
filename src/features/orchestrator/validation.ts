@@ -28,7 +28,7 @@ export function validateEvidence(task: TaskValue, evidence: EvidenceValue | null
   return { ok: reasons.length === 0, reasons }
 }
 
-export type ReportSection = {
+type ReportSection = {
   status: 'completed' | 'partial' | 'failed' | 'unvalidated'
   tasks: string[]
   note: string

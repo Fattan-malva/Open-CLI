@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { isDesktop } from './platform'
 
-export type ProcessMemory = {
+type ProcessMemory = {
   pid: number
   name: string
   label: string

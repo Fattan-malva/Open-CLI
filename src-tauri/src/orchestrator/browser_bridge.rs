@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager, Webview};
+use tauri::{AppHandle, Manager, Webview};
 
 #[derive(Clone)]
 pub struct BridgeGrant {
@@ -165,84 +165,6 @@ fn inspect_state_op(app: &AppHandle, tab_label: &str) -> Result<Value, String> {
         "(() => window.__opencliInspect ? (window.__opencliInspect.take() || null) : null)()",
     )
 }
-
-const INSPECT_SCRIPT: &str = r#"(() => {
-  if (window.__opencliInspectInstalled) return;
-  window.__opencliInspectInstalled = true;
-  const state = { enabled: false, selection: null, hovered: null };
-  window.__opencliInspect = state;
-  const cleanPath = (element) => {
-    const parts = [];
-    let current = element;
-    while (current && current.tagName && parts.length < 12) {
-      let part = current.tagName.toLowerCase();
-      if (current.id) { part += '#' + current.id; parts.unshift(part); break; }
-      const className = typeof current.className === 'string' ? current.className.trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.') : '';
-      if (className) part += '.' + className;
-      const parent = current.parentElement;
-      if (parent) {
-        const siblings = Array.from(parent.children).filter((child) => child.tagName === current.tagName);
-        if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
-      }
-      parts.unshift(part);
-      current = parent;
-    }
-    return parts.join(' > ');
-  };
-  const collect = (element) => {
-    const attributes = {};
-    for (const attribute of Array.from(element.attributes || [])) {
-      const name = attribute.name.toLowerCase();
-      if (name.startsWith('data-') || ['id','name','role','aria-label','title','type','placeholder','href'].includes(name)) {
-        attributes[attribute.name] = String(attribute.value).slice(0, 500);
-      }
-    }
-    const hierarchy = [];
-    let current = element;
-    while (current && current.tagName && hierarchy.length < 12) {
-      hierarchy.push(current.tagName.toLowerCase() + (current.id ? '#' + current.id : ''));
-      current = current.parentElement;
-    }
-    return {
-      tag: element.tagName.toLowerCase(),
-      visibleText: String(element.innerText || element.textContent || '').trim().slice(0, 10000),
-      attributes,
-      classes: typeof element.className === 'string' ? element.className.trim().split(/\s+/).filter(Boolean).slice(0, 30) : [],
-      selector: cleanPath(element),
-      hierarchy,
-      pageUrl: location.href,
-      pageTitle: document.title || '',
-      capturedAt: new Date().toISOString()
-    };
-  };
-  const clearHover = () => {
-    if (state.hovered) { state.hovered.style.outline = ''; state.hovered.style.outlineOffset = ''; state.hovered = null; }
-  };
-  document.addEventListener('mousemove', (event) => {
-    if (!state.enabled) return;
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    if (state.hovered !== target) {
-      clearHover();
-      state.hovered = target;
-      target.style.outline = '2px solid #38bdf8';
-      target.style.outlineOffset = '1px';
-    }
-  }, true);
-  document.addEventListener('click', (event) => {
-    if (!state.enabled) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const target = event.target;
-    if (target instanceof HTMLElement) {
-      state.selection = collect(target);
-      state.enabled = false;
-      clearHover();
-    }
-  }, true);
-  state.enable = (enabled) => { state.enabled = !!enabled; if (!enabled) clearHover(); };
-  state.take = () => { const selection = state.selection; state.selection = null; return selection; };
-})()"#;
 
 pub fn call(
     app: &AppHandle,
@@ -469,86 +391,3 @@ pub fn stop_for_tab(state: &BrowserBridgeState, tab_label: &str) -> Result<usize
     Ok(tokens.len())
 }
 
-pub fn inspect(
-    app: &AppHandle,
-    state: &BrowserBridgeState,
-    tab_label: &str,
-    token: &str,
-    enabled: bool,
-) -> Result<(), String> {
-    let grant = state
-        .grants
-        .lock()
-        .map_err(|error| error.to_string())?
-        .get(token)
-        .cloned()
-        .ok_or_else(|| "invalid browser bridge token".to_string())?;
-    if grant.tab_label != tab_label {
-        return Err("browser bridge token does not match tab".to_string());
-    }
-    if grant.expires_at <= now_ms() {
-        return Err("browser bridge grant expired".to_string());
-    }
-    let webview = app
-        .get_webview(tab_label)
-        .ok_or_else(|| format!("browser tab {} not found", tab_label))?;
-    webview
-        .eval(INSPECT_SCRIPT)
-        .map_err(|error| error.to_string())?;
-    webview
-        .eval(&format!(
-            "window.__opencliInspect.enable({})",
-            if enabled { "true" } else { "false" }
-        ))
-        .map_err(|error| error.to_string())?;
-    if !enabled {
-        if let Ok(inspects) = state.inspects.lock() {
-            if let Some(flag) = inspects.get(token) {
-                flag.store(true, Ordering::Relaxed);
-            }
-        }
-        return Ok(());
-    }
-
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    state
-        .inspects
-        .lock()
-        .map_err(|error| error.to_string())?
-        .insert(token.to_string(), stop_flag.clone());
-    let app_handle = app.clone();
-    let label = tab_label.to_string();
-    std::thread::spawn(move || {
-        let started = SystemTime::now();
-        while !stop_flag.load(Ordering::Relaxed)
-            && started.elapsed().unwrap_or_default().as_secs() < 300
-        {
-            let Some(webview) = app_handle.get_webview(&label) else {
-                break;
-            };
-            let Ok(selection) = eval_json(
-                &webview,
-                "(() => window.__opencliInspect ? (window.__opencliInspect.take() || null) : null)()",
-            ) else {
-                break;
-            };
-            if !selection.is_null() {
-                let _ = app_handle.emit("orchestrator:browser-element", selection);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(150));
-        }
-    });
-    Ok(())
-}
-
-pub fn snapshot(app: &AppHandle, tab_label: &str) -> Result<Value, String> {
-    let webview = app
-        .get_webview(tab_label)
-        .ok_or_else(|| format!("browser tab {} not found", tab_label))?;
-    let title = eval_json(&webview, "document.title || ''").map_err(|error| error.to_string())?;
-    Ok(json!({
-        "url": webview.url().map(|url| url.to_string()).unwrap_or_default(),
-        "title": title,
-    }))
-}

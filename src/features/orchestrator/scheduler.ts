@@ -29,11 +29,11 @@ const ACTIVE_STATUSES = new Set<TaskValue['status']>([
   'validating',
 ])
 
-export function activeTaskCount(tasks: TaskValue[]): number {
+function activeTaskCount(tasks: TaskValue[]): number {
   return tasks.filter((task) => ACTIVE_STATUSES.has(task.status)).length
 }
 
-export function agentCanTake(
+function agentCanTake(
   agent: AgentSessionValue,
   task: TaskValue,
   activeBySession: Map<string, string>

@@ -11,7 +11,7 @@ type WindowControlProps = {
   children: React.ReactNode
 }
 
-export function WindowControl({
+function WindowControl({
   label,
   onClick,
   destructive,

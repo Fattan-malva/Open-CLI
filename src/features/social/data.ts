@@ -17,7 +17,7 @@ export type SocialSite = {
   iconUrl?: string
 }
 
-export const socialSites: Record<string, SocialSite> = {
+const socialSites: Record<string, SocialSite> = {
   whatsapp: {
     label: 'WhatsApp',
     url: 'https://web.whatsapp.com/',

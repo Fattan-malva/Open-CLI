@@ -23,16 +23,15 @@ import {
   type BrowserContextValue,
   type BrowserElementContextValue,
   type OrchestratorEventValue,
-  type RunValue,
   type SnapshotValue,
   type TaskValue,
 } from './types'
 
-export type OrchestratorMode = 'terminal' | 'orchestrator'
+type OrchestratorMode = 'terminal' | 'orchestrator'
 
 export const MIN_ORCHESTRATOR_AGENTS = 2
 
-export type ChatMessage = {
+type ChatMessage = {
   id: string
   role: 'user' | 'orchestrator'
   text: string
@@ -86,7 +85,7 @@ type OrchestratorState = {
   clearError: () => void
 }
 
-export function liveTerminalAgentCount() {
+function liveTerminalAgentCount() {
   return useTerminalStore.getState().tabs.filter((tab) => Boolean(tab.agentId)).length
 }
 
@@ -110,7 +109,7 @@ const EMPTY: SnapshotValue = {
 
 const EMPTY_CONTEXT: BrowserContextValue = { page: null, element: null }
 
-export const ACTIVE_TASK_STATUSES = new Set<TaskValue['status']>([
+const ACTIVE_TASK_STATUSES = new Set<TaskValue['status']>([
   'assigned',
   'running',
   'waiting',
@@ -572,15 +571,6 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 }))
-
-export function activeRun(state: OrchestratorState): RunValue | null {
-  return state.snapshot.runs.find((run) => run.id === state.activeRunId) ?? null
-}
-
-export function runTasks(state: OrchestratorState, runId?: string): TaskValue[] {
-  const id = runId ?? state.activeRunId
-  return state.snapshot.tasks.filter((task) => task.runId === id)
-}
 
 export function detachOrchestratorListeners(): void {
   unlistenEvents?.()

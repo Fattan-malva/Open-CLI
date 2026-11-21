@@ -5,41 +5,6 @@ import type {
   TaskValue,
 } from './types'
 
-export const EVENT_TYPES = [
-  'run.created',
-  'run.planning',
-  'run.plan_ready',
-  'run.executing',
-  'run.waiting',
-  'run.validating',
-  'run.integrating',
-  'run.completed',
-  'run.partial',
-  'run.failed',
-  'run.cancelled',
-  'run.needs_approval',
-  'task.assigned',
-  'task.started',
-  'task.progress',
-  'task.completed',
-  'task.failed',
-  'task.blocked',
-  'task.needs_input',
-  'task.validating',
-  'task.conflict',
-  'task.cancelled',
-  'dependency.satisfied',
-  'artifact.ready',
-  'workspace.conflict',
-  'validation.result',
-  'browser.element',
-  'browser.grant',
-  'browser.revoke',
-  'message',
-] as const
-
-export type OrchestratorEventType = (typeof EVENT_TYPES)[number]
-
 export class EventHub {
   private readonly seen = new Set<string>()
 

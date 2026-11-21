@@ -522,34 +522,6 @@ impl Drop for StartingGuard<'_> {
 }
 
 #[tauri::command]
-async fn pty_spawn(
-    app: AppHandle,
-    state: State<'_, PtyState>,
-    id: String,
-    cols: u16,
-    rows: u16,
-    shell: Option<String>,
-    cwd: Option<String>,
-    initial_command: Option<String>,
-) -> Result<(), String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        spawn_pty_session(
-            &app,
-            &state,
-            &id,
-            cols,
-            rows,
-            shell,
-            cwd,
-            initial_command.as_deref(),
-        )
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
 async fn pty_ensure(
     app: AppHandle,
     state: State<'_, PtyState>,
@@ -1448,7 +1420,6 @@ pub fn run() {
     tauri::Builder::default()
         .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
-            pty_spawn,
             pty_ensure,
             pty_write,
             pty_resize,
@@ -1486,7 +1457,6 @@ pub fn run() {
             orchestrator::commands::orchestrator_snapshot,
             orchestrator::commands::orchestrator_upsert_run,
             orchestrator::commands::orchestrator_upsert_task,
-            orchestrator::commands::orchestrator_upsert_approval,
             orchestrator::commands::orchestrator_emit_event,
             orchestrator::commands::orchestrator_next_event_id,
             orchestrator::commands::orchestrator_register_agent,
@@ -1504,10 +1474,7 @@ pub fn run() {
             orchestrator::commands::orchestrator_integrate,
             orchestrator::commands::orchestrator_recover,
             orchestrator::commands::orchestrator_browser_bridge_start,
-            orchestrator::commands::orchestrator_browser_bridge_stop,
-            orchestrator::commands::orchestrator_browser_call,
-            orchestrator::commands::orchestrator_browser_inspect,
-            orchestrator::commands::orchestrator_browser_snapshot
+            orchestrator::commands::orchestrator_browser_bridge_stop
         ])
         .setup(|app| {
             if let Err(error) = ensure_agent_cli_file(app.handle()) {

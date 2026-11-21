@@ -64,15 +64,8 @@ export function assertTransition(label: string, allowed: boolean): void {
   if (!allowed) throw new Error(`Invalid ${label} transition`)
 }
 
-export const TERMINAL_TASK_STATES: readonly TaskStateValue[] = [
+const TERMINAL_TASK_STATES: readonly TaskStateValue[] = [
   'completed',
-  'failed',
-  'cancelled',
-]
-
-export const TERMINAL_RUN_STATES: readonly RunStateValue[] = [
-  'completed',
-  'partial',
   'failed',
   'cancelled',
 ]
@@ -81,6 +74,3 @@ export function isTerminalTaskState(state: TaskStateValue): boolean {
   return TERMINAL_TASK_STATES.includes(state)
 }
 
-export function isTerminalRunState(state: RunStateValue): boolean {
-  return TERMINAL_RUN_STATES.includes(state)
-}

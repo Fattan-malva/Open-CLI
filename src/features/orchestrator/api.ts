@@ -2,13 +2,11 @@
 import { listen } from '@tauri-apps/api/event'
 import { isDesktop } from '@/lib/platform'
 import {
-  Approval,
   OrchestratorEvent,
   OrchestratorSnapshot,
   Run,
   Task,
   Workspace,
-  type ApprovalValue,
   type OrchestratorEventValue,
   type RunValue,
   type SnapshotValue,
@@ -104,10 +102,6 @@ export function putRun(run: RunValue): Promise<RunValue> {
 
 export function putTask(task: TaskValue): Promise<TaskValue> {
   return call('orchestrator_upsert_task', { task }, Task)
-}
-
-export function putApproval(approval: ApprovalValue): Promise<ApprovalValue> {
-  return call('orchestrator_upsert_approval', { approval }, Approval)
 }
 
 export function emitEvent(event: OrchestratorEventValue): Promise<OrchestratorEventValue> {
@@ -206,36 +200,6 @@ export function browserBridgeStart(tabLabel: string, agentId: string): Promise<B
 
 export function browserBridgeStop(token: string): Promise<void> {
   return call('orchestrator_browser_bridge_stop', { token }, undefined, undefined)
-}
-
-export function browserBridgeCall(
-  tabLabel: string,
-  token: string,
-  op: string,
-  args: Record<string, unknown>
-): Promise<string> {
-  return call(
-    'orchestrator_browser_call',
-    { tabLabel, token, op, argsJson: JSON.stringify(args) },
-    undefined,
-    ''
-  )
-}
-
-export function browserInspect(tabLabel: string, token: string, enabled: boolean): Promise<void> {
-  return call(
-    'orchestrator_browser_inspect',
-    { tabLabel, token, enabled },
-    undefined,
-    undefined
-  )
-}
-
-export function browserPageSnapshot(tabLabel: string): Promise<{ url: string; title: string }> {
-  return call('orchestrator_browser_snapshot', { tabLabel }, undefined, {
-    url: '',
-    title: '',
-  })
 }
 
 export async function onBrowserElement(

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const RUN_STATES = [
+const RUN_STATES = [
   'draft',
   'planning',
   'plan_ready',
@@ -15,7 +15,7 @@ export const RUN_STATES = [
   'needs_approval',
 ] as const
 
-export const TASK_STATES = [
+const TASK_STATES = [
   'queued',
   'blocked',
   'ready',
@@ -30,7 +30,7 @@ export const TASK_STATES = [
   'conflict',
 ] as const
 
-export const AGENT_STATES = [
+const AGENT_STATES = [
   'idle',
   'busy',
   'waiting',
@@ -40,19 +40,19 @@ export const AGENT_STATES = [
   'stopped',
 ] as const
 
-export const RunState = z.enum(RUN_STATES)
-export const TaskState = z.enum(TASK_STATES)
-export const AgentState = z.enum(AGENT_STATES)
-export const Risk = z.enum(['low', 'medium', 'high'])
-export const IsolationMode = z.enum(['worktree', 'shared', 'none'])
+const RunState = z.enum(RUN_STATES)
+const TaskState = z.enum(TASK_STATES)
+const AgentState = z.enum(AGENT_STATES)
+const Risk = z.enum(['low', 'medium', 'high'])
+const IsolationMode = z.enum(['worktree', 'shared', 'none'])
 
-export const TaskScope = z.object({
+const TaskScope = z.object({
   allowedPaths: z.array(z.string()).default([]),
   forbiddenPaths: z.array(z.string()).default([]),
   interfaces: z.array(z.string()).default([]),
 })
 
-export const EvidenceCommand = z.object({
+const EvidenceCommand = z.object({
   command: z.string(),
   exitCode: z.number().int().nullable(),
   output: z.string().max(20000).optional(),
@@ -126,7 +126,7 @@ export const Workspace = z.object({
   createdAt: z.string(),
 })
 
-export const Assignment = z.object({
+const Assignment = z.object({
   taskId: z.string(),
   sessionId: z.string(),
   workspaceId: z.string(),
@@ -134,7 +134,7 @@ export const Assignment = z.object({
   dispatchedAt: z.string(),
 })
 
-export const Message = z.object({
+const Message = z.object({
   id: z.string(),
   runId: z.string(),
   taskId: z.string().nullable(),
@@ -169,14 +169,14 @@ export const Approval = z.object({
   decidedAt: z.string().nullable().default(null),
 })
 
-export const BrowserPageContext = z.object({
+const BrowserPageContext = z.object({
   url: z.string(),
   title: z.string(),
   capturedAt: z.string(),
   selectedText: z.string().max(20000).optional(),
 })
 
-export const BrowserElementContext = z.object({
+const BrowserElementContext = z.object({
   tag: z.string(),
   visibleText: z.string().max(10000),
   attributes: z.record(z.string(), z.string()),
@@ -193,7 +193,7 @@ export const BrowserContext = z.object({
   element: BrowserElementContext.nullable().default(null),
 })
 
-export const Attachment = z.object({
+const Attachment = z.object({
   name: z.string(),
   path: z.string(),
   kind: z.enum(['file', 'image']),
@@ -243,12 +243,9 @@ export type PlanValue = z.infer<typeof Plan>
 export type TaskValue = z.infer<typeof Task>
 export type AgentSessionValue = z.infer<typeof AgentSession>
 export type WorkspaceValue = z.infer<typeof Workspace>
-export type AssignmentValue = z.infer<typeof Assignment>
-export type MessageValue = z.infer<typeof Message>
 export type OrchestratorEventValue = z.infer<typeof OrchestratorEvent>
 export type ApprovalValue = z.infer<typeof Approval>
 export type BrowserContextValue = z.infer<typeof BrowserContext>
-export type BrowserPageContextValue = z.infer<typeof BrowserPageContext>
 export type BrowserElementContextValue = z.infer<typeof BrowserElementContext>
 export type AttachmentValue = z.infer<typeof Attachment>
 export type RunSettingsValue = z.infer<typeof RunSettings>

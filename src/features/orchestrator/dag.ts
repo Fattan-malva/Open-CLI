@@ -34,7 +34,7 @@ function pathTouches(path: string, candidate: string): boolean {
   return a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
 }
 
-export function scopeOverlaps(a: TaskScopeValue, b: TaskScopeValue): boolean {
+function scopeOverlaps(a: TaskScopeValue, b: TaskScopeValue): boolean {
   for (const left of a.allowedPaths) {
     for (const right of b.allowedPaths) {
       if (pathTouches(left, right)) return true
@@ -208,12 +208,6 @@ export function validateDag(tasks: DagTask[]): DagValidation {
     order: order ?? [],
     criticalPath: criticalPath(tasks),
   }
-}
-
-export function dependentsOf(tasks: DagTask[], id: string): string[] {
-  return tasks
-    .filter((task) => task.dependencies.includes(id))
-    .map((task) => task.id)
 }
 
 export function isReady(tasks: DagTask[], task: DagTask): boolean {

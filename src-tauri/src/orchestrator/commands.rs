@@ -107,17 +107,6 @@ pub async fn orchestrator_upsert_task(
 }
 
 #[tauri::command(async)]
-pub async fn orchestrator_upsert_approval(
-    store: State<'_, OrchestratorStore>,
-    approval: Value,
-) -> Result<Value, String> {
-    let id = string_field(&approval, "id")?;
-    let run_id = string_field(&approval, "runId")?;
-    let state = string_field(&approval, "status")?;
-    store.upsert("approvals", &id, &run_id, &state, &approval)
-}
-
-#[tauri::command(async)]
 pub async fn orchestrator_emit_event(
     app: AppHandle,
     store: State<'_, OrchestratorStore>,
@@ -457,34 +446,3 @@ pub async fn orchestrator_browser_bridge_stop(
     browser_bridge::stop(&browser, &token)
 }
 
-#[tauri::command(async)]
-pub async fn orchestrator_browser_call(
-    app: AppHandle,
-    browser: State<'_, BrowserBridgeState>,
-    tab_label: String,
-    token: String,
-    op: String,
-    args_json: String,
-) -> Result<String, String> {
-    let args: Value = serde_json::from_str(&args_json).unwrap_or_else(|_| json!({}));
-    browser_bridge::call(&app, &browser, &tab_label, &token, &op, &args)
-}
-
-#[tauri::command(async)]
-pub async fn orchestrator_browser_inspect(
-    app: AppHandle,
-    browser: State<'_, BrowserBridgeState>,
-    tab_label: String,
-    token: String,
-    enabled: bool,
-) -> Result<(), String> {
-    browser_bridge::inspect(&app, &browser, &tab_label, &token, enabled)
-}
-
-#[tauri::command(async)]
-pub async fn orchestrator_browser_snapshot(
-    app: AppHandle,
-    tab_label: String,
-) -> Result<Value, String> {
-    browser_bridge::snapshot(&app, &tab_label)
-}

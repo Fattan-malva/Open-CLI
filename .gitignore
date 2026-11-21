@@ -58,3 +58,6 @@ Desktop.ini
 **/cli-agent.json
 **/browser-privacy.json
 /src/assets/material-icon-theme/icons/
+
+# Tauri generated schemas (recreated on every build)
+src-tauri/gen/

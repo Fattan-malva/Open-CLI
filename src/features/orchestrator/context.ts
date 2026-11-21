@@ -11,7 +11,7 @@ const REDACT_PATTERNS: RegExp[] = [
   /(eyj[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\.[a-z0-9_-]{10,})/gi,
 ]
 
-export function redact(text: string): string {
+function redact(text: string): string {
   let value = text
   for (const pattern of REDACT_PATTERNS) value = value.replace(pattern, '[REDACTED]')
   return value

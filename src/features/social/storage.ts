@@ -75,7 +75,7 @@ export function readCustomSocialSites(): CustomSocialSite[] {
   }
 }
 
-export function writeCustomSocialSites(sites: CustomSocialSite[]) {
+function writeCustomSocialSites(sites: CustomSocialSite[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sites))
   } catch {

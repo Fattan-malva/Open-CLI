@@ -1,7 +1,6 @@
 import * as api from './api'
 import { buildTaskPrompt, clamp } from './context'
 import { validateDag } from './dag'
-import { EventHub } from './events'
 import { generatePlan } from './planner'
 import { selectDispatchable, shouldUnblock } from './scheduler'
 import { isTerminalTaskState } from './state-machines'
@@ -397,4 +396,3 @@ export async function integrateTask(ctx: EngineContext, taskId: string): Promise
   await emit(ctx, task.runId, task.id, 'validation.result', { ok: true, integrated: true })
 }
 
-export { EventHub }

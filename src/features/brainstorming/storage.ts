@@ -91,7 +91,7 @@ export function readCustomBrainstormApps(): CustomBrainstormApp[] {
   }
 }
 
-export function writeCustomBrainstormApps(apps: CustomBrainstormApp[]) {
+function writeCustomBrainstormApps(apps: CustomBrainstormApp[]) {
   try {
     localStorage.setItem(CUSTOM_APPS_KEY, JSON.stringify(apps))
   } catch {

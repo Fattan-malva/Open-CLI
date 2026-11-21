@@ -66,7 +66,7 @@ function iconUrlForId(id: string | undefined, fallback: string) {
   return (fileName && iconUrls.get(fileName)) || iconUrls.get(fallback) || ''
 }
 
-export function resolveMaterialIcon(
+function resolveMaterialIcon(
   name: string,
   options: { isFolder?: boolean; expanded?: boolean } = {}
 ) {
