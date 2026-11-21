@@ -3,7 +3,8 @@ import { EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { X } from 'lucide-react'
+import { FileCode2, FolderTree, Save, Search, X, type LucideIcon } from 'lucide-react'
+import { ShortcutKeys } from '@/features/agent-cli/components/shortcut-keys'
 import { languageExtensionForPath } from '../lib/language'
 import type { IdeFile, IdeSettings } from '../types'
 
@@ -34,6 +35,38 @@ function relativePath(root: string | null, path: string) {
   }
   return path
 }
+
+const editorShortcuts: {
+  keys: string[]
+  label: string
+  description: string
+  icon: LucideIcon
+}[] = [
+  {
+    keys: ['Ctrl', 'P'],
+    label: 'Buka file cepat',
+    description: 'Cari dan buka file di folder workspace.',
+    icon: Search,
+  },
+  {
+    keys: ['Ctrl', 'Shift', 'E'],
+    label: 'Fokus Explorer',
+    description: 'Tampilkan pohon file workspace.',
+    icon: FolderTree,
+  },
+  {
+    keys: ['Ctrl', 'Shift', 'F'],
+    label: 'Cari di file',
+    description: 'Cari teks di seluruh workspace.',
+    icon: Search,
+  },
+  {
+    keys: ['Ctrl', 'S'],
+    label: 'Simpan file',
+    description: 'Simpan perubahan pada file aktif.',
+    icon: Save,
+  },
+]
 
 export function EditorArea({
   root,
@@ -196,8 +229,44 @@ export function EditorArea({
           <div ref={mountRef} className='ide-codemirror min-h-0 flex-1 overflow-hidden' />
         </>
       ) : (
-        <div className='flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground'>
-          Pilih file di Explorer atau tekan Ctrl+P.
+        <div className='flex min-h-0 flex-1 flex-col items-center justify-center gap-6 overflow-auto px-6 py-8'>
+          <div className='max-w-xl text-center'>
+            <div className='mx-auto flex size-11 items-center justify-center rounded-lg border bg-muted/40'>
+              <FileCode2 className='size-5 text-muted-foreground' />
+            </div>
+            <h2 className='mt-3 text-sm font-semibold'>Belum ada file dibuka</h2>
+            <p className='mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted-foreground'>
+              Pilih file dari Explorer atau tekan shortcut berikut untuk mulai bekerja
+              di folder workspace.
+            </p>
+            <div className='mt-3 flex justify-center'>
+              <ShortcutKeys keys={['Ctrl', 'P']} />
+            </div>
+          </div>
+          <div className='grid w-full max-w-2xl gap-2 text-left sm:grid-cols-2'>
+            {editorShortcuts.map((shortcut) => {
+              const Icon = shortcut.icon
+              return (
+                <div
+                  key={shortcut.label}
+                  className='rounded-lg border bg-secondary/50 p-3'
+                >
+                  <div className='flex items-center gap-2'>
+                    <span className='flex size-7 items-center justify-center rounded-md bg-background/70'>
+                      <Icon className='size-3.5 text-muted-foreground' />
+                    </span>
+                    <span className='text-[11px] font-medium'>{shortcut.label}</span>
+                  </div>
+                  <div className='mt-2'>
+                    <ShortcutKeys keys={shortcut.keys} />
+                  </div>
+                  <p className='mt-2 text-[10px] leading-relaxed text-muted-foreground'>
+                    {shortcut.description}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>

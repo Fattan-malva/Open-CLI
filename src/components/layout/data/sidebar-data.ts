@@ -64,13 +64,11 @@ export const sidebarData: SidebarData = {
           title: 'Dashboard',
           url: '/',
           icon: LayoutDashboard,
-          badge: 'Soon',
         },
         {
           title: 'Tasks',
           url: '/tasks',
           icon: ListTodo,
-          badge: 'Soon',
         },
       ],
     },

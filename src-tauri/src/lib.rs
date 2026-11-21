@@ -8,6 +8,8 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 mod orchestrator;
+mod system_monitor;
+mod user_tasks;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -1602,6 +1604,7 @@ pub fn run() {
             pty_idle_sessions,
             pty_suspend,
             system_memory_available_percent,
+            system_monitor::system_memory_snapshot,
             pty_kill,
             browser_open,
             browser_set_bounds,
@@ -1627,6 +1630,14 @@ pub fn run() {
             ide_fs_write_text,
             ide_fs_search_text,
             ide_fs_search_files,
+            user_tasks::user_task_list,
+            user_tasks::user_task_create,
+            user_tasks::user_task_update,
+            user_tasks::user_task_delete,
+            user_tasks::user_todo_list,
+            user_tasks::user_todo_create,
+            user_tasks::user_todo_update,
+            user_tasks::user_todo_delete,
             orchestrator::commands::orchestrator_snapshot,
             orchestrator::commands::orchestrator_upsert_run,
             orchestrator::commands::orchestrator_upsert_task,
@@ -1656,6 +1667,9 @@ pub fn run() {
         .setup(|app| {
             if let Err(error) = ensure_agent_cli_file(app.handle()) {
                 eprintln!("Gagal menyiapkan data/cli-agent.json: {}", error);
+            }
+            if let Err(error) = user_tasks::init(app.handle()) {
+                eprintln!("Gagal menyiapkan tasks/tasks.sqlite: {}", error);
             }
             orchestrator::init(app.handle());
             if read_browser_privacy(app.handle()).session_only {
