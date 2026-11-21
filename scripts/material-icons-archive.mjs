@@ -13,8 +13,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const source = resolve(root, 'node_modules/material-icon-theme')
-export const materialIconsDir = resolve(root, 'src/assets/material-icon-theme')
-export const materialIconsArchive = resolve(
+const materialIconsDir = resolve(root, 'src/assets/material-icon-theme')
+const materialIconsArchive = resolve(
   materialIconsDir,
   'material-icons.zip'
 )

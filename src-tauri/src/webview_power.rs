@@ -73,8 +73,9 @@ mod windows_impl {
     };
     use windows_core::{Interface, BOOL, HSTRING};
 
+    /// Unknown state (the init script did not run) counts as busy, so calls are never cut off.
     const BUSY_CHECK: &str =
-        "(() => { try { return !!(window.__opencliBusy && window.__opencliBusy()); } catch (error) { return true; } })()";
+        "(() => { try { return !window.__opencliBusy || !!window.__opencliBusy(); } catch (error) { return true; } })()";
 
     pub fn apply(platform: &PlatformWebview, visible: bool, pausable: bool) {
         let controller = platform.controller();
