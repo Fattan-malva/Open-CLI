@@ -1,12 +1,21 @@
 import { Bot, Terminal } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { useTerminalStore } from '@/features/terminal/store'
 import { cn } from '@/lib/utils'
-import { useOrchestratorStore } from '../store'
+import {
+  availableAgentCount,
+  MIN_ORCHESTRATOR_AGENTS,
+  useOrchestratorStore,
+} from '../store'
 
 export function OrchestratorModeSwitch() {
   const mode = useOrchestratorStore((state) => state.mode)
-  const agentCount = useOrchestratorStore((state) => state.snapshot.agents.length)
+  const storedAgentCount = useOrchestratorStore(availableAgentCount)
+  const terminalAgentCount = useTerminalStore(
+    (state) => state.tabs.filter((tab) => Boolean(tab.agentId)).length
+  )
+  const agentCount = Math.max(storedAgentCount, terminalAgentCount)
   const setMode = useOrchestratorStore((state) => state.setMode)
 
   return (
@@ -31,8 +40,13 @@ export function OrchestratorModeSwitch() {
         size='sm'
         aria-pressed={mode === 'orchestrator'}
         onClick={() => {
-          if (agentCount === 0) toast.error('No active native Agent CLI session is available')
-          setMode('orchestrator')
+          if (agentCount < MIN_ORCHESTRATOR_AGENTS) {
+            toast.error(
+              `Minimal ${MIN_ORCHESTRATOR_AGENTS} Agent CLI aktif diperlukan untuk Orchestrator`
+            )
+            return
+          }
+          setMode('orchestrator', agentCount)
         }}
         className={cn(
           'h-6 gap-1 px-2 text-[11px]',

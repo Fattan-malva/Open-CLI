@@ -171,6 +171,7 @@ export const TerminalPane = memo(function TerminalPane({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(mount)
+    term.element?.querySelector('.xterm-viewport')?.classList.add('no-scrollbar')
     termRef.current = term
     fitRef.current = fit
 

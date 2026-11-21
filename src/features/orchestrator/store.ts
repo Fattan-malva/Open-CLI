@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { loadAgentCliStore } from '@/lib/agent-cli-store'
+import { useTerminalStore } from '@/features/terminal/store'
 import * as api from './api'
 import { browserBridgeStart, browserBridgeStop } from './api'
 import {
@@ -29,6 +30,8 @@ import {
 
 export type OrchestratorMode = 'terminal' | 'orchestrator'
 
+export const MIN_ORCHESTRATOR_AGENTS = 2
+
 export type ChatMessage = {
   id: string
   role: 'user' | 'orchestrator'
@@ -52,8 +55,9 @@ type OrchestratorState = {
   eventHub: EventHub
   engine: EngineContext
   hydrated: boolean
+  agentSessionCount: number
   hydrate: () => Promise<void>
-  setMode: (mode: OrchestratorMode) => void
+  setMode: (mode: OrchestratorMode, agentCount?: number) => void
   syncAgents: (
     tabs: Array<{
       id: string
@@ -80,6 +84,17 @@ type OrchestratorState = {
   shareBrowser: (tabLabel: string, agentId: string) => Promise<void>
   revokeBrowser: (token: string) => Promise<void>
   clearError: () => void
+}
+
+export function liveTerminalAgentCount() {
+  return useTerminalStore.getState().tabs.filter((tab) => Boolean(tab.agentId)).length
+}
+
+export function availableAgentCount(state: {
+  agentSessionCount: number
+  snapshot: SnapshotValue
+}) {
+  return Math.max(state.agentSessionCount, state.snapshot.agents.length, liveTerminalAgentCount())
 }
 
 const EMPTY: SnapshotValue = {
@@ -138,6 +153,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   eventHub: new EventHub(),
   engine: defaultEngineContext,
   hydrated: false,
+  agentSessionCount: 0,
 
   hydrate: () => {
     if (get().hydrated) return Promise.resolve()
@@ -174,9 +190,12 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     return hydratePromise
   },
 
-  setMode: (mode) => {
-    if (mode === 'orchestrator' && get().snapshot.agents.length === 0) {
-      set({ error: 'No active native Agent CLI session is available' })
+  setMode: (mode, agentCount) => {
+    const count = agentCount ?? availableAgentCount(get())
+    if (mode === 'orchestrator' && count < MIN_ORCHESTRATOR_AGENTS) {
+      set({
+        error: `Minimal ${MIN_ORCHESTRATOR_AGENTS} Agent CLI aktif diperlukan untuk Orchestrator`,
+      })
       return
     }
     set({ mode, error: null })
@@ -234,8 +253,15 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           await api.unregisterAgent(agent.id)
           changed = true
         }
+        const agentSessionCount = tabs.filter((tab) => tab.agentId).length
         if (changed) {
-          set({ snapshot: await api.orchestratorSnapshot(), error: null })
+          set({
+            snapshot: await api.orchestratorSnapshot(),
+            error: null,
+            agentSessionCount,
+          })
+        } else if (get().agentSessionCount !== agentSessionCount) {
+          set({ agentSessionCount })
         }
       } catch (error) {
         set({ error: error instanceof Error ? error.message : String(error) })
@@ -319,6 +345,12 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     const run = state.snapshot.runs.find((item) => item.id === targetId)
     if (!run) {
       set({ error: 'No active run' })
+      return
+    }
+    if (availableAgentCount(state) < MIN_ORCHESTRATOR_AGENTS) {
+      set({
+        error: `Minimal ${MIN_ORCHESTRATOR_AGENTS} Agent CLI aktif diperlukan untuk Orchestrator`,
+      })
       return
     }
     const coordinator =
@@ -405,8 +437,10 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       set({ error: 'Buat rencana terlebih dahulu' })
       return
     }
-    if (state.snapshot.agents.length === 0) {
-      set({ error: 'No eligible agent is available' })
+    if (availableAgentCount(state) < MIN_ORCHESTRATOR_AGENTS) {
+      set({
+        error: `Minimal ${MIN_ORCHESTRATOR_AGENTS} Agent CLI aktif diperlukan untuk Orchestrator`,
+      })
       return
     }
     set({ busy: true, error: null })

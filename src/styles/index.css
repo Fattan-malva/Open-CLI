@@ -22,6 +22,15 @@
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
+  .xterm .xterm-viewport {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+  .xterm .xterm-viewport::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+  }
   html {
     @apply overflow-x-hidden;
   }

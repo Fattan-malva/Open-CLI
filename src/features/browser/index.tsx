@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { Lock, Plus, RotateCw, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -63,6 +71,15 @@ export function BrowserWorkspace({
   const [tabs, setTabs] = useState<BrowserTab[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null)
+  const tabStripRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{
+    id: string
+    pointerId: number
+    startX: number
+    startY: number
+    moved: boolean
+  } | null>(null)
   const justDraggedRef = useRef(false)
   const dragEndTimerRef = useRef<number | null>(null)
   const [draft, setDraft] = useState('')
@@ -219,7 +236,12 @@ export function BrowserWorkspace({
   )
 
   const finishDrag = useCallback(() => {
+    const moved = Boolean(dragRef.current?.moved)
+    dragRef.current = null
     setDraggingId(null)
+    setDropTargetId(null)
+    if (!moved) return
+
     justDraggedRef.current = true
     if (dragEndTimerRef.current !== null) {
       window.clearTimeout(dragEndTimerRef.current)
@@ -227,7 +249,7 @@ export function BrowserWorkspace({
     dragEndTimerRef.current = window.setTimeout(() => {
       justDraggedRef.current = false
       dragEndTimerRef.current = null
-    }, 0)
+    }, 50)
   }, [])
 
   const reorderTabs = useCallback((fromId: string, toId: string) => {
@@ -242,8 +264,77 @@ export function BrowserWorkspace({
     })
   }, [])
 
+  const handleTabPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>, id: string) => {
+      if (event.button !== 0) return
+      if ((event.target as HTMLElement).closest('button')) return
+      dragRef.current = {
+        id,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+      }
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      } catch {
+        dragRef.current = null
+      }
+    },
+    []
+  )
+
+  const handleTabPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const candidate = dragRef.current
+      if (!candidate || candidate.pointerId !== event.pointerId) return
+      if (!candidate.moved) {
+        const distance = Math.hypot(
+          event.clientX - candidate.startX,
+          event.clientY - candidate.startY
+        )
+        if (distance < 5) return
+        candidate.moved = true
+        setDraggingId(candidate.id)
+      }
+
+      const strip = tabStripRef.current
+      if (strip) {
+        const rect = strip.getBoundingClientRect()
+        const edge = 48
+        if (event.clientX < rect.left + edge) strip.scrollLeft -= 12
+        else if (event.clientX > rect.right - edge) strip.scrollLeft += 12
+      }
+
+      const target = document
+        .elementFromPoint(event.clientX, event.clientY)
+        ?.closest<HTMLElement>('[data-browser-tab-id]')
+      const targetId = target?.dataset.browserTabId ?? null
+      if (targetId && targetId !== candidate.id) {
+        setDropTargetId(targetId)
+        reorderTabs(candidate.id, targetId)
+      } else {
+        setDropTargetId(null)
+      }
+    },
+    [reorderTabs]
+  )
+
+  const handleTabPointerUp = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const candidate = dragRef.current
+      if (!candidate || candidate.pointerId !== event.pointerId) return
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }
+      finishDrag()
+    },
+    [finishDrag]
+  )
+
   useEffect(() => {
     return () => {
+      dragRef.current = null
       if (dragEndTimerRef.current !== null) {
         window.clearTimeout(dragEndTimerRef.current)
       }
@@ -376,30 +467,21 @@ export function BrowserWorkspace({
 
       <Main fixed fluid className='min-h-0 flex-1 overflow-hidden p-0'>
         <div className='flex h-full min-h-0 flex-col'>
-          <div className='flex h-10 shrink-0 items-end gap-1 overflow-x-auto bg-muted/40 px-2 pt-1 no-scrollbar'>
+          <div
+            ref={tabStripRef}
+            className='flex h-10 shrink-0 items-end gap-1 overflow-x-auto bg-muted/40 px-2 pt-1 no-scrollbar'
+          >
             {tabs.map((tab) => (
               <div
                 key={tab.id}
                 role='tab'
                 aria-selected={tab.id === activeId}
                 tabIndex={0}
-                draggable
-                onDragStart={(event) => {
-                  setDraggingId(tab.id)
-                  event.dataTransfer.effectAllowed = 'move'
-                  event.dataTransfer.setData('text/plain', tab.id)
-                }}
-                onDragOver={(event) => {
-                  event.preventDefault()
-                  event.dataTransfer.dropEffect = 'move'
-                }}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  const fromId = draggingId ?? event.dataTransfer.getData('text/plain')
-                  if (fromId) reorderTabs(fromId, tab.id)
-                  finishDrag()
-                }}
-                onDragEnd={finishDrag}
+                data-browser-tab-id={tab.id}
+                onPointerDown={(event) => handleTabPointerDown(event, tab.id)}
+                onPointerMove={handleTabPointerMove}
+                onPointerUp={handleTabPointerUp}
+                onPointerCancel={finishDrag}
                 onClick={() => {
                   if (!justDraggedRef.current) setActiveId(tab.id)
                 }}
@@ -410,11 +492,12 @@ export function BrowserWorkspace({
                   }
                 }}
                 className={cn(
-                  'group flex h-8 max-w-[42vw] min-w-0 shrink-0 cursor-grab items-center gap-2 rounded-md px-2.5 text-xs transition-colors active:cursor-grabbing',
+                  'group flex h-8 max-w-[42vw] min-w-0 shrink-0 cursor-grab touch-none select-none items-center gap-2 rounded-md px-2.5 text-xs transition-colors active:cursor-grabbing',
                   tab.id === activeId
                     ? 'bg-background text-foreground'
                     : 'bg-muted/60 text-muted-foreground hover:bg-muted',
-                  draggingId === tab.id && 'opacity-50'
+                  draggingId === tab.id && 'opacity-50',
+                  dropTargetId === tab.id && 'ring-1 ring-primary'
                 )}
               >
                 <span className='min-w-0 flex-1 truncate'>{tab.title}</span>

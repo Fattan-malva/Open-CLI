@@ -187,6 +187,17 @@ function projectLabel(path: string | null) {
   return clean.split(/[\\/]/).filter(Boolean).pop() ?? clean
 }
 
+function isRootProject(path: string | null) {
+  if (!path) return true
+  return /^[a-zA-Z]:$/.test(path.replace(/[\\/]+$/, ''))
+}
+
+type LaunchAction = {
+  command?: string
+  title?: string
+  agentId?: string
+}
+
 type Layout = {
   cols: number
   rows: number
@@ -300,6 +311,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   const browserTerminalPaneRef = useRef<HTMLDivElement>(null)
   const animationTimer = useRef<number | null>(null)
   const closeShortcutInFlight = useRef(false)
+  const pendingLaunchRef = useRef<LaunchAction | null>(null)
   const browserAxis = browserStacked ? 'y' : 'x'
   const orchestratorMode = useOrchestratorStore((state) => state.mode)
   const hydrateOrchestrator = useOrchestratorStore((state) => state.hydrate)
@@ -487,14 +499,14 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
 
   const handleActivate = useCallback((id: string) => setActive(id), [setActive])
 
-  const newTab = useCallback((command?: string, title?: string, agentId?: string) => {
+  const newTab = useCallback((command?: string, title?: string, agentId?: string, cwd?: string) => {
     const resolvedTitle =
       agentId && title
         ? nextAgentTitle(useTerminalStore.getState().tabs, title, agentId)
         : title
     const id = add(shell, {
       title: resolvedTitle,
-      cwd: agentStore?.projectPath ?? undefined,
+      cwd: cwd ?? agentStore?.projectPath ?? undefined,
       command,
       agentId,
     })
@@ -506,9 +518,25 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     }, 320)
   }, [add, agentStore?.projectPath, setActive, shell])
 
+  const requestLaunch = useCallback(
+    (action: LaunchAction) => {
+      if (isRootProject(agentStore?.projectPath ?? null)) {
+        pendingLaunchRef.current = action
+        setPickerOpen(true)
+        return
+      }
+      newTab(action.command, action.title, action.agentId)
+    },
+    [agentStore?.projectPath, newTab]
+  )
+
   const addLauncher = useCallback(() => {
-    newTab(selectedAgent?.command, selectedAgent?.name, selectedAgent?.id)
-  }, [newTab, selectedAgent])
+    requestLaunch({
+      command: selectedAgent?.command,
+      title: selectedAgent?.name,
+      agentId: selectedAgent?.id,
+    })
+  }, [requestLaunch, selectedAgent])
 
   const selectProject = useCallback(
     (path: string | null) => {
@@ -529,11 +557,32 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     []
   )
 
+  const handleProjectSelect = useCallback(
+    (path: string | null) => {
+      selectProject(path)
+      const pending = pendingLaunchRef.current
+      pendingLaunchRef.current = null
+      if (pending) {
+        newTab(pending.command, pending.title, pending.agentId, path ?? undefined)
+      }
+    },
+    [newTab, selectProject]
+  )
+
+  const handlePickerOpenChange = useCallback((open: boolean) => {
+    setPickerOpen(open)
+    if (!open) pendingLaunchRef.current = null
+  }, [])
+
   const launchAgent = useCallback(
     (agent: AgentCliItem) => {
-      newTab(agent.command, agent.name, agent.id)
+      requestLaunch({
+        command: agent.command,
+        title: agent.name,
+        agentId: agent.id,
+      })
     },
-    [newTab]
+    [requestLaunch]
   )
 
   const handleLauncherChange = useCallback(
@@ -1219,9 +1268,9 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
 
       <ProjectPickerDialog
         open={pickerOpen}
-        onOpenChange={setPickerOpen}
+        onOpenChange={handlePickerOpenChange}
         value={agentStore?.projectPath ?? null}
-        onSelect={selectProject}
+        onSelect={handleProjectSelect}
       />
 
       <AlertDialog

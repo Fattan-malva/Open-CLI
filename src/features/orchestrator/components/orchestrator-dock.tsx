@@ -4,7 +4,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
-import { useOrchestratorStore } from '../store'
+import {
+  availableAgentCount,
+  MIN_ORCHESTRATOR_AGENTS,
+  useOrchestratorStore,
+} from '../store'
 
 function stateVariant(state: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (['completed', 'ready', 'plan_ready', 'idle'].includes(state)) return 'default'
@@ -36,6 +40,7 @@ const AGENT_STATUS_HELP: Record<string, string> = {
 export function OrchestratorDock() {
   const [text, setText] = useState('')
   const snapshot = useOrchestratorStore((state) => state.snapshot)
+  const agentCount = useOrchestratorStore(availableAgentCount)
   const messages = useOrchestratorStore((state) => state.messages)
   const context = useOrchestratorStore((state) => state.context)
   const grants = useOrchestratorStore((state) => state.grants)
@@ -143,7 +148,7 @@ export function OrchestratorDock() {
                     <Button
                       type='button'
                       size='sm'
-                      disabled={busy || snapshot.agents.length === 0}
+                      disabled={busy || agentCount < MIN_ORCHESTRATOR_AGENTS}
                       onClick={() => void generatePlan(run.id)}
                       className='h-6 px-2 text-[10px]'
                     >

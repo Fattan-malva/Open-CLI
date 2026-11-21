@@ -17,7 +17,12 @@ import { Main } from '@/components/layout/main'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { useOrchestratorStore } from '../store'
+import { useTerminalStore } from '@/features/terminal/store'
+import {
+  availableAgentCount,
+  MIN_ORCHESTRATOR_AGENTS,
+  useOrchestratorStore,
+} from '../store'
 
 const AGENT_STATUS_LABEL: Record<string, string> = {
   idle: 'Siap',
@@ -58,6 +63,11 @@ export function OrchestratorLanding() {
   const busy = useOrchestratorStore((state) => state.busy)
   const hydrate = useOrchestratorStore((state) => state.hydrate)
   const refreshAgents = useOrchestratorStore((state) => state.refreshAgents)
+  const storedAgentCount = useOrchestratorStore(availableAgentCount)
+  const terminalAgentCount = useTerminalStore(
+    (state) => state.tabs.filter((tab) => Boolean(tab.agentId)).length
+  )
+  const agentCount = Math.max(storedAgentCount, terminalAgentCount)
 
   useEffect(() => {
     void hydrate().then(() => refreshAgents())
@@ -76,12 +86,14 @@ export function OrchestratorLanding() {
   const recentRuns = useMemo(() => [...snapshot.runs].reverse().slice(0, 4), [snapshot.runs])
 
   function openOrchestrator() {
-    if (snapshot.agents.length === 0) {
-      toast.error('Jalankan Agent CLI dari Terminal terlebih dahulu')
+    if (agentCount < MIN_ORCHESTRATOR_AGENTS) {
+      toast.error(
+        `Jalankan minimal ${MIN_ORCHESTRATOR_AGENTS} Agent CLI dari Terminal terlebih dahulu`
+      )
       void navigate({ to: '/terminal' })
       return
     }
-    useOrchestratorStore.getState().setMode('orchestrator')
+    useOrchestratorStore.getState().setMode('orchestrator', agentCount)
     void navigate({ to: '/terminal' })
   }
 
@@ -124,7 +136,7 @@ export function OrchestratorLanding() {
 
           <div className='grid w-full grid-cols-3 gap-2 lg:w-80'>
             <Card className='gap-1 p-3 text-center shadow-sm'>
-              <span className='text-2xl font-semibold'>{snapshot.agents.length}</span>
+              <span className='text-2xl font-semibold'>{agentCount}</span>
               <span className='text-[11px] text-muted-foreground'>Agent aktif</span>
             </Card>
             <Card className='gap-1 p-3 text-center shadow-sm'>
