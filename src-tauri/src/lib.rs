@@ -3,8 +3,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 mod orchestrator;
@@ -64,13 +64,48 @@ const LEGACY_RUNTIME_DIR_NAME: &str = "OpenCLI";
 const DEV_APP_DIR_NAME: &str = "opencli-dev";
 const UNINSTALL_CONFIRMATION: &str = "UNINSTALL";
 const PTY_FLUSH_INTERVAL_MS: u128 = 16;
-const PTY_FLUSH_BYTES: usize = 32 * 1024;
+const PTY_FLUSH_BYTES: usize = 64 * 1024;
+const PTY_READ_BUFFER: usize = 16 * 1024;
+const MAX_CONCURRENT_PTY_SPAWNS: usize = 2;
 
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_millis() as u64)
         .unwrap_or(0)
+}
+
+static PTY_SPAWN_ACTIVE: OnceLock<Mutex<usize>> = OnceLock::new();
+static PTY_SPAWN_CONDVAR: OnceLock<Condvar> = OnceLock::new();
+
+fn pty_spawn_gate() -> (&'static Mutex<usize>, &'static Condvar) {
+    (
+        PTY_SPAWN_ACTIVE.get_or_init(|| Mutex::new(0)),
+        PTY_SPAWN_CONDVAR.get_or_init(Condvar::new),
+    )
+}
+
+struct PtySpawnSlot;
+
+impl PtySpawnSlot {
+    fn acquire() -> Self {
+        let (lock, condvar) = pty_spawn_gate();
+        let mut active = lock.lock().unwrap();
+        while *active >= MAX_CONCURRENT_PTY_SPAWNS {
+            active = condvar.wait(active).unwrap();
+        }
+        *active += 1;
+        Self
+    }
+}
+
+impl Drop for PtySpawnSlot {
+    fn drop(&mut self) {
+        let (lock, condvar) = pty_spawn_gate();
+        let mut active = lock.lock().unwrap();
+        *active = active.saturating_sub(1);
+        condvar.notify_one();
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -174,16 +209,16 @@ struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
-    active: Arc<AtomicBool>,
     last_output: Arc<AtomicU64>,
     #[cfg(windows)]
     job: Option<JobHandle>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct PtyState {
     pub(crate) sessions: Arc<Mutex<HashMap<String, Session>>>,
-    starting: Mutex<HashSet<String>>,
+    starting: Arc<Mutex<HashSet<String>>>,
+    cancelled: Arc<Mutex<HashSet<String>>>,
 }
 
 pub(crate) fn pty_write_session(state: &PtyState, id: &str, data: &str) -> Result<(), String> {
@@ -308,6 +343,7 @@ fn spawn_pty_session(
     rows: u16,
     shell: Option<String>,
     cwd: Option<String>,
+    initial_command: Option<&str>,
 ) -> Result<(), String> {
     {
         let mut starting = state.starting.lock().unwrap();
@@ -320,6 +356,10 @@ fn spawn_pty_session(
         }
     }
 
+    let _spawn_slot = PtySpawnSlot::acquire();
+    if state.cancelled.lock().unwrap().remove(id) {
+        return Ok(());
+    }
     let result = (|| -> Result<(), String> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -332,12 +372,29 @@ fn spawn_pty_session(
             .map_err(|e| e.to_string())?;
 
         let shell = shell.unwrap_or_else(|| "powershell.exe".to_string());
+        let shell_lower = shell.to_lowercase();
+        let startup_command = initial_command.filter(|value| !value.trim().is_empty());
         let mut cmd = CommandBuilder::new(&shell);
-        if shell.to_lowercase().contains("powershell") && !shell.to_lowercase().contains("pwsh") {
-            cmd.arg("-NoLogo");
+        if shell_lower.contains("pwsh") {
+            cmd.args(["-NoLogo", "-NoExit"]);
+            if let Some(command) = startup_command {
+                cmd.arg("-Command");
+                cmd.arg(command);
+            }
+        } else if shell_lower.contains("powershell") {
+            cmd.args(["-NoLogo", "-NoProfile", "-NoExit"]);
+            if let Some(command) = startup_command {
+                cmd.arg("-Command");
+                cmd.arg(command);
+            }
+        } else if shell_lower.contains("cmd") {
+            cmd.args(["/D", "/Q", "/K"]);
+            if let Some(command) = startup_command {
+                cmd.arg(command);
+            }
         }
         cmd.env("TERM", "xterm-256color");
-        if let Some(dir) = cwd {
+        if let Some(dir) = cwd.as_deref() {
             cmd.cwd(dir);
         }
 
@@ -356,7 +413,6 @@ fn spawn_pty_session(
 
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-        let active = Arc::new(AtomicBool::new(true));
         let last_output = Arc::new(AtomicU64::new(now_millis()));
 
         state.sessions.lock().unwrap().insert(
@@ -365,17 +421,27 @@ fn spawn_pty_session(
                 writer,
                 master: pair.master,
                 child,
-                active: active.clone(),
                 last_output: last_output.clone(),
                 #[cfg(windows)]
                 job,
             },
         );
 
+        if state.cancelled.lock().unwrap().remove(id) {
+            let mut session = state
+                .sessions
+                .lock()
+                .unwrap()
+                .remove(id)
+                .ok_or("session not found")?;
+            terminate_tree(&mut session);
+            return Ok(());
+        }
+
         let event_id = id.to_string();
         let app_handle = app.clone();
         std::thread::spawn(move || {
-            let mut buf = [0u8; 8192];
+            let mut buf = [0u8; PTY_READ_BUFFER];
             let mut pending: Vec<u8> = Vec::with_capacity(PTY_FLUSH_BYTES);
             let mut last_flush = Instant::now();
             loop {
@@ -388,7 +454,7 @@ fn spawn_pty_session(
                         last_output.store(now_millis(), Ordering::Relaxed);
                         let elapsed = last_flush.elapsed().as_millis();
                         if pending.len() >= PTY_FLUSH_BYTES || elapsed >= PTY_FLUSH_INTERVAL_MS {
-                            if active.load(Ordering::Relaxed) && !pending.is_empty() {
+                            if !pending.is_empty() {
                                 emit(&app_handle, "pty:data", &event_id, BASE64.encode(&pending));
                             }
                             pending.clear();
@@ -398,7 +464,7 @@ fn spawn_pty_session(
                     Err(_) => break,
                 }
             }
-            if active.load(Ordering::Relaxed) && !pending.is_empty() {
+            if !pending.is_empty() {
                 emit(&app_handle, "pty:data", &event_id, BASE64.encode(&pending));
             }
             emit(&app_handle, "pty:exit", &event_id, String::new());
@@ -411,7 +477,7 @@ fn spawn_pty_session(
 }
 
 #[tauri::command]
-fn pty_spawn(
+async fn pty_spawn(
     app: AppHandle,
     state: State<'_, PtyState>,
     id: String,
@@ -419,12 +485,27 @@ fn pty_spawn(
     rows: u16,
     shell: Option<String>,
     cwd: Option<String>,
+    initial_command: Option<String>,
 ) -> Result<(), String> {
-    spawn_pty_session(&app, &state, &id, cols, rows, shell, cwd)
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        spawn_pty_session(
+            &app,
+            &state,
+            &id,
+            cols,
+            rows,
+            shell,
+            cwd,
+            initial_command.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn pty_ensure(
+async fn pty_ensure(
     app: AppHandle,
     state: State<'_, PtyState>,
     id: String,
@@ -432,128 +513,208 @@ fn pty_ensure(
     rows: u16,
     shell: Option<String>,
     cwd: Option<String>,
+    initial_command: Option<String>,
 ) -> Result<bool, String> {
-    if state.sessions.lock().unwrap().contains_key(&id) {
-        return Ok(false);
-    }
-    spawn_pty_session(&app, &state, &id, cols, rows, shell, cwd)?;
-    Ok(true)
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let exists = state
+            .sessions
+            .lock()
+            .map_err(|error| error.to_string())?
+            .contains_key(&id);
+        if exists {
+            return Ok(false);
+        }
+        spawn_pty_session(
+            &app,
+            &state,
+            &id,
+            cols,
+            rows,
+            shell,
+            cwd,
+            initial_command.as_deref(),
+        )?;
+        Ok(true)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
-pub(crate) fn ensure_pty_session(
+pub(crate) fn ensure_pty_session_with_command(
     app: &AppHandle,
     state: &PtyState,
     id: &str,
     shell: Option<String>,
     cwd: Option<String>,
+    initial_command: Option<&str>,
 ) -> Result<(), String> {
-    spawn_pty_session(app, state, id, 80, 24, shell, cwd)
+    spawn_pty_session(app, state, id, 80, 24, shell, cwd, initial_command)
 }
 
 #[tauri::command]
-fn pty_write(state: State<'_, PtyState>, id: String, data: String) -> Result<(), String> {
-    pty_write_session(&state, &id, &data)
+async fn pty_write(state: State<'_, PtyState>, id: String, data: String) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || pty_write_session(&state, &id, &data))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn pty_resize(state: State<'_, PtyState>, id: String, cols: u16, rows: u16) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    let session = sessions.get(&id).ok_or("session not found")?;
-    session
-        .master
-        .resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| e.to_string())
+async fn pty_resize(
+    state: State<'_, PtyState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+        let session = sessions.get(&id).ok_or("session not found")?;
+        session
+            .master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn pty_is_busy(state: State<'_, PtyState>, id: String) -> Result<bool, String> {
-    let mut sessions = state.sessions.lock().unwrap();
-    let Some(session) = sessions.get_mut(&id) else {
-        return Ok(false);
-    };
+async fn pty_is_busy(state: State<'_, PtyState>, id: String) -> Result<bool, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+        let Some(session) = sessions.get_mut(&id) else {
+            return Ok(false);
+        };
 
-    #[cfg(windows)]
-    {
-        if let Some(job) = &session.job {
-            if let Some(busy) = job.busy() {
-                return Ok(busy);
+        #[cfg(windows)]
+        {
+            if let Some(job) = &session.job {
+                if let Some(busy) = job.busy() {
+                    return Ok(busy);
+                }
+            }
+            if let Some(pid) = session.child.process_id() {
+                if has_descendant_process(pid) {
+                    return Ok(true);
+                }
             }
         }
-        if let Some(pid) = session.child.process_id() {
-            if has_descendant_process(pid) {
-                return Ok(true);
-            }
+
+        if session
+            .child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Ok(false);
         }
-    }
 
-    if session
-        .child
-        .try_wait()
-        .map_err(|e| e.to_string())?
-        .is_some()
-    {
-        return Ok(false);
-    }
+        #[cfg(not(windows))]
+        return Ok(true);
 
-    #[cfg(not(windows))]
-    return Ok(true);
-
-    Ok(false)
+        Ok(false)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn pty_kill(app: AppHandle, state: State<'_, PtyState>, id: String) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().unwrap();
-    if let Some(mut session) = sessions.remove(&id) {
-        terminate_tree(&mut session);
-    }
-    emit(&app, "pty:exit", &id, String::new());
-    Ok(())
+async fn pty_kill(
+    app: AppHandle,
+    state: State<'_, PtyState>,
+    id: String,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state
+            .cancelled
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(id.clone());
+        let mut sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+        if let Some(mut session) = sessions.remove(&id) {
+            terminate_tree(&mut session);
+        }
+        emit(&app, "pty:exit", &id, String::new());
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn pty_set_active(state: State<'_, PtyState>, id: String, active: bool) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    let Some(session) = sessions.get(&id) else {
-        return Ok(());
-    };
-    session.active.store(active, Ordering::Relaxed);
-    if active {
-        session.last_output.store(now_millis(), Ordering::Relaxed);
-    }
-    Ok(())
+async fn pty_set_active(
+    state: State<'_, PtyState>,
+    id: String,
+    active: bool,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+        let Some(session) = sessions.get(&id) else {
+            return Ok(());
+        };
+        if active {
+            session.last_output.store(now_millis(), Ordering::Relaxed);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn pty_idle_sessions(
+async fn pty_idle_sessions(
     state: State<'_, PtyState>,
     idle_after_ms: u64,
 ) -> Result<Vec<String>, String> {
-    let now = now_millis();
-    let sessions = state.sessions.lock().unwrap();
-    Ok(sessions
-        .iter()
-        .filter(|(_, session)| {
-            now.saturating_sub(session.last_output.load(Ordering::Relaxed)) >= idle_after_ms
-        })
-        .map(|(id, _)| id.clone())
-        .collect())
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = now_millis();
+        let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+        Ok(sessions
+            .iter()
+            .filter(|(_, session)| {
+                now.saturating_sub(session.last_output.load(Ordering::Relaxed)) >= idle_after_ms
+            })
+            .map(|(id, _)| id.clone())
+            .collect())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn pty_suspend(app: AppHandle, state: State<'_, PtyState>, id: String) -> Result<bool, String> {
-    let mut sessions = state.sessions.lock().unwrap();
-    if let Some(mut session) = sessions.remove(&id) {
-        terminate_tree(&mut session);
-        emit(&app, "pty:suspended", &id, String::new());
-        return Ok(true);
-    }
-    Ok(false)
+async fn pty_suspend(
+    app: AppHandle,
+    state: State<'_, PtyState>,
+    id: String,
+) -> Result<bool, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state
+            .cancelled
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(id.clone());
+        let mut sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+        if let Some(mut session) = sessions.remove(&id) {
+            terminate_tree(&mut session);
+            emit(&app, "pty:suspended", &id, String::new());
+            return Ok(true);
+        }
+        Ok(false)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

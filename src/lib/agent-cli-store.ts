@@ -61,18 +61,38 @@ function parseStore(raw: string): AgentCliStoreData {
   }
 }
 
+let cachedStore: AgentCliStoreData | null = null
+let storePromise: Promise<AgentCliStoreData> | null = null
+
 export async function loadAgentCliStore(): Promise<AgentCliStoreData> {
   if (!isDesktop) return EMPTY_STORE
+  if (cachedStore) return cachedStore
+  if (storePromise) return storePromise
 
-  try {
-    const raw = await invoke<string>('agent_cli_read')
-    return parseStore(raw)
-  } catch {
-    return EMPTY_STORE
-  }
+  storePromise = invoke<string>('agent_cli_read')
+    .then((raw) => {
+      cachedStore = parseStore(raw)
+      return cachedStore
+    })
+    .catch(() => {
+      cachedStore = EMPTY_STORE
+      return EMPTY_STORE
+    })
+    .finally(() => {
+      storePromise = null
+    })
+
+  return storePromise
 }
 
 export async function saveAgentCliStore(data: AgentCliStoreData): Promise<void> {
   if (!isDesktop) return
-  await invoke('agent_cli_write', { contents: JSON.stringify(data) })
+  cachedStore = data
+  storePromise = null
+  try {
+    await invoke('agent_cli_write', { contents: JSON.stringify(data) })
+  } catch (error) {
+    cachedStore = null
+    throw error
+  }
 }

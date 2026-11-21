@@ -79,12 +79,14 @@ const shells = [
     label: 'PowerShell',
     Icon: PowerShellIcon,
     iconClassName: 'size-4 text-[#5391FE]',
+    shortcut: ['Ctrl', 'Alt', 'P'],
   },
   {
     value: 'cmd.exe',
     label: 'CMD',
     Icon: CmdIcon,
     iconClassName: 'size-4',
+    shortcut: ['Ctrl', 'Alt', 'C'],
   },
 ]
 
@@ -140,6 +142,18 @@ const GAP = 2
 const CLOSE_STEP_MS = 70
 const TERMINAL_BROWSER_SPLIT_KEY = 'opencli.terminal.browser.split.v1'
 const MIN_TERMINAL_ROW_HEIGHT = 180
+
+function isDialogOpen() {
+  return Boolean(document.querySelector('[role="dialog"]'))
+}
+
+function shouldHandleShortcut(target: EventTarget | null) {
+  if (isDialogOpen()) return false
+  if (!(target instanceof HTMLElement)) return true
+  const inTerminal = Boolean(target.closest('.xterm'))
+  if (inTerminal) return true
+  return !target.closest('input, textarea, [contenteditable="true"]')
+}
 
 function clampBrowserSplit(value: number) {
   if (!Number.isFinite(value)) return 0.5
@@ -285,6 +299,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   const browserSplitRef = useRef<HTMLDivElement>(null)
   const browserTerminalPaneRef = useRef<HTMLDivElement>(null)
   const animationTimer = useRef<number | null>(null)
+  const closeShortcutInFlight = useRef(false)
   const browserAxis = browserStacked ? 'y' : 'x'
   const orchestratorMode = useOrchestratorStore((state) => state.mode)
   const hydrateOrchestrator = useOrchestratorStore((state) => state.hydrate)
@@ -470,6 +485,8 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     }
   }, [])
 
+  const handleActivate = useCallback((id: string) => setActive(id), [setActive])
+
   const newTab = useCallback((command?: string, title?: string, agentId?: string) => {
     const resolvedTitle =
       agentId && title
@@ -531,18 +548,9 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     if (!isDesktop) return
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat) return
       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
       if (event.key.length !== 1 || !/^[a-z]$/i.test(event.key)) return
-      if (document.querySelector('[role="dialog"]')) return
-
-      const target = event.target
-      if (
-        target instanceof HTMLElement &&
-        target.closest('input, textarea, [contenteditable="true"]')
-      ) {
-        return
-      }
+      if (!shouldHandleShortcut(event.target)) return
 
       const letter = event.key.toUpperCase()
       const agent = activeAgents.find(
@@ -558,8 +566,8 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
       launchAgent(agent)
     }
 
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [activeAgents, launchAgent])
 
   const terminate = useCallback(
@@ -589,64 +597,86 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   )
 
   const closeOneByShortcut = useCallback(async () => {
-    if (pendingIds.length > 0) return
-    const currentTabs = useTerminalStore.getState().tabs
-    if (currentTabs.length === 0) return
+    if (closeShortcutInFlight.current || pendingIds.length > 0) return
+    closeShortcutInFlight.current = true
+    try {
+      const currentTabs = useTerminalStore.getState().tabs
+      if (currentTabs.length === 0) return
 
-    const bottomFirst = [...currentTabs].reverse()
-    const statuses = await Promise.all(
-      bottomFirst.map(async (tab) => ({
-        id: tab.id,
-        busy: await ptyIsBusy(tab.id).catch(() => isDesktop),
-      }))
-    )
-    const idle = statuses.find((status) => !status.busy)
-    if (idle) {
-      await terminate([idle.id])
-      return
+      const bottomFirst = [...currentTabs].reverse()
+      const statuses = await Promise.all(
+        bottomFirst.map(async (tab) => ({
+          id: tab.id,
+          busy: await ptyIsBusy(tab.id).catch(() => isDesktop),
+        }))
+      )
+      const idle = statuses.find((status) => !status.busy)
+      if (idle) {
+        await terminate([idle.id])
+        return
+      }
+
+      const busy = statuses[0]
+      if (busy) setPendingIds([busy.id])
+    } finally {
+      closeShortcutInFlight.current = false
     }
-
-    const busy = statuses[0]
-    if (busy) setPendingIds([busy.id])
   }, [pendingIds, terminate])
 
   const closeAllByShortcut = useCallback(async () => {
-    if (pendingIds.length > 0) return
-    const currentTabs = useTerminalStore.getState().tabs
-    if (currentTabs.length === 0) return
+    if (closeShortcutInFlight.current || pendingIds.length > 0) return
+    closeShortcutInFlight.current = true
+    try {
+      const currentTabs = useTerminalStore.getState().tabs
+      if (currentTabs.length === 0) return
 
-    const bottomFirst = [...currentTabs].reverse()
-    const statuses = await Promise.all(
-      bottomFirst.map(async (tab) => ({
-        id: tab.id,
-        busy: await ptyIsBusy(tab.id).catch(() => isDesktop),
-      }))
-    )
-    const idle = statuses
-      .filter((status) => !status.busy)
-      .map((status) => status.id)
-    const busy = statuses
-      .filter((status) => status.busy)
-      .map((status) => status.id)
+      const bottomFirst = [...currentTabs].reverse()
+      const statuses = await Promise.all(
+        bottomFirst.map(async (tab) => ({
+          id: tab.id,
+          busy: await ptyIsBusy(tab.id).catch(() => isDesktop),
+        }))
+      )
+      const idle = statuses
+        .filter((status) => !status.busy)
+        .map((status) => status.id)
+      const busy = statuses
+        .filter((status) => status.busy)
+        .map((status) => status.id)
 
-    await terminate(idle)
+      await terminate(idle)
 
-    const stillBusy: string[] = []
-    for (const id of busy) {
-      const busyNow = await ptyIsBusy(id).catch(() => isDesktop)
-      if (busyNow) stillBusy.push(id)
-      else await terminate([id])
-    }
+      const stillBusy: string[] = []
+      for (const id of busy) {
+        const busyNow = await ptyIsBusy(id).catch(() => isDesktop)
+        if (busyNow) stillBusy.push(id)
+        else await terminate([id])
+      }
 
-    if (stillBusy.length > 0) {
-      setPendingIds((current) => Array.from(new Set([...current, ...stillBusy])))
+      if (stillBusy.length > 0) {
+        setPendingIds((current) => Array.from(new Set([...current, ...stillBusy])))
+      }
+    } finally {
+      closeShortcutInFlight.current = false
     }
   }, [pendingIds, terminate])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      if (!shouldHandleShortcut(event.target)) return
+      if (event.ctrlKey && event.altKey && !event.shiftKey) {
+        const shell = shells.find(
+          (item) =>
+            item.shortcut?.[item.shortcut.length - 1]?.toUpperCase() ===
+            event.key.toUpperCase()
+        )
+        if (shell) {
+          event.preventDefault()
+          event.stopPropagation()
+          handleLauncherChange(shell.value)
+          return
+        }
+      }
       if (
         event.ctrlKey &&
         !event.shiftKey &&
@@ -707,6 +737,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     addLauncher,
     closeAllByShortcut,
     closeOneByShortcut,
+    handleLauncherChange,
     setActive,
     visible,
   ])
@@ -913,7 +944,8 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
                   tab={tab}
                   active={activeId === tab.id}
                   visible={showTerminal}
-                  onActivate={() => setActive(tab.id)}
+                  suppressResize={Boolean(drag || browserDrag)}
+                  onActivate={handleActivate}
                   onRequestClose={requestClose}
                   onRename={rename}
                 />
@@ -1022,6 +1054,10 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
                           className={selectedShell.iconClassName}
                         />
                         <span className='truncate'>{selectedShell.label}</span>
+                        <ShortcutKeys
+                          keys={selectedShell.shortcut}
+                          className='ml-auto shrink-0'
+                        />
                       </>
                     )}
                   </span>
@@ -1029,11 +1065,15 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
                 <SelectContent className='max-h-72 [&_[data-radix-select-viewport]]:h-auto [&_[data-radix-select-viewport]]:max-h-64'>
                   <SelectGroup>
                     <SelectLabel>Shell</SelectLabel>
-                    {shells.map(({ value, label, Icon, iconClassName }) => (
+                    {shells.map(({ value, label, Icon, iconClassName, shortcut }) => (
                       <SelectItem key={value} value={value}>
-                        <span className='flex items-center gap-2'>
+                        <span className='flex min-w-0 flex-1 items-center gap-2'>
                           <Icon className={iconClassName} />
-                          {label}
+                          <span className='truncate'>{label}</span>
+                          <ShortcutKeys
+                            keys={shortcut}
+                            className='ml-auto shrink-0'
+                          />
                         </span>
                       </SelectItem>
                     ))}

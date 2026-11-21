@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal, type ITheme } from '@xterm/xterm'
-import { Copy, Crosshair, Pencil, X } from 'lucide-react'
+import { Copy, Crosshair, LoaderCircle, Pencil, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isDesktop } from '@/lib/platform'
 import {
@@ -44,15 +45,17 @@ type TerminalPaneProps = {
   tab: TerminalTab
   active: boolean
   visible: boolean
-  onActivate: () => void
+  suppressResize?: boolean
+  onActivate: (id: string) => void
   onRequestClose: (id: string) => void
   onRename: (id: string, title: string) => void
 }
 
-export function TerminalPane({
+export const TerminalPane = memo(function TerminalPane({
   tab,
   active,
   visible,
+  suppressResize = false,
   onActivate,
   onRequestClose,
   onRename,
@@ -61,10 +64,12 @@ export function TerminalPane({
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const visibleRef = useRef(visible)
+  const suppressResizeRef = useRef(suppressResize)
   const inputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const commandTimerRef = useRef<number | null>(null)
-  const commandSentRef = useRef(false)
+  const inputBufferRef = useRef('')
+  const inputTimerRef = useRef<number | null>(null)
+  const exitedRef = useRef(false)
   const [exited, setExited] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -74,19 +79,14 @@ export function TerminalPane({
   const ensureSession = useCallback(async () => {
     if (!isDesktop) return
     try {
-      const started = await ptyEnsure(
+      await ptyEnsure(
         tab.id,
         termRef.current?.cols ?? 80,
         termRef.current?.rows ?? 24,
         tab.shell,
-        tab.cwd
+        tab.cwd,
+        tab.command || undefined
       )
-      if (started && tab.command && !commandSentRef.current) {
-        commandSentRef.current = true
-        commandTimerRef.current = window.setTimeout(() => {
-          void ptyWrite(tab.id, `${tab.command}\r`).catch(() => undefined)
-        }, 350)
-      }
     } catch {
       if (visibleRef.current) {
         termRef.current?.writeln('Gagal memulai shell. Periksa pengaturan shell.')
@@ -96,7 +96,7 @@ export function TerminalPane({
 
   useEffect(() => {
     visibleRef.current = visible
-    if (!visible) return
+    if (!visible || suppressResizeRef.current) return
     const frame = requestAnimationFrame(() => {
       try {
         fitRef.current?.fit()
@@ -108,11 +108,23 @@ export function TerminalPane({
   }, [visible])
 
   useEffect(() => {
-    if (!isDesktop || !sessionReady) return
-    void ensureSession().finally(() => {
-      void ptySetActive(tab.id, active && visible).catch(() => undefined)
+    suppressResizeRef.current = suppressResize
+    if (suppressResize) return
+    const frame = requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit()
+      } catch {
+        return
+      }
     })
-  }, [active, visible, sessionReady, ensureSession, tab.id])
+    return () => cancelAnimationFrame(frame)
+  }, [suppressResize])
+
+  useEffect(() => {
+    if (!isDesktop || !sessionReady) return
+    if (active && visible) void ensureSession().catch(() => undefined)
+    void ptySetActive(tab.id, active && visible).catch(() => undefined)
+  }, [active, visible, sessionReady, tab.id, ensureSession])
 
   useEffect(() => {
     if (!editing) return
@@ -147,13 +159,12 @@ export function TerminalPane({
 
     const term = new Terminal({
       allowTransparency: false,
-      cursorBlink: true,
+      cursorBlink: false,
       cursorStyle: 'bar',
       fontFamily: 'Cascadia Mono, Consolas, "Courier New", monospace',
       fontSize: 12,
       lineHeight: 1.3,
-      letterSpacing: 0.2,
-      scrollback: 2500,
+      scrollback: 1000,
       theme,
       convertEol: true,
     })
@@ -163,20 +174,73 @@ export function TerminalPane({
     termRef.current = term
     fitRef.current = fit
 
+    let webglAddon: WebglAddon | null = null
+    try {
+      webglAddon = new WebglAddon()
+      webglAddon.onContextLoss(() => {
+        webglAddon?.dispose()
+        webglAddon = null
+      })
+      term.loadAddon(webglAddon)
+    } catch {
+      webglAddon = null
+    }
+
     let disposed = false
+    let resizeFrame: number | null = null
     const cleanups: (() => void | Promise<void>)[] = []
 
     const resize = () => {
-      if (disposed || mount.clientWidth === 0 || mount.clientHeight === 0) return
-      try {
-        fit.fit()
-      } catch {
+      if (
+        disposed ||
+        suppressResizeRef.current ||
+        mount.clientWidth === 0 ||
+        mount.clientHeight === 0 ||
+        resizeFrame !== null
+      ) {
         return
       }
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = null
+        if (disposed || suppressResizeRef.current) return
+        try {
+          fit.fit()
+        } catch {
+          return
+        }
+      })
     }
 
     const observer = new ResizeObserver(() => resize())
     observer.observe(mount)
+
+    const flushInput = () => {
+      if (inputTimerRef.current !== null) {
+        window.clearTimeout(inputTimerRef.current)
+        inputTimerRef.current = null
+      }
+      const data = inputBufferRef.current
+      inputBufferRef.current = ''
+      if (data && !disposed) void ptyWrite(tab.id, data).catch(() => undefined)
+    }
+
+    const queueInput = (data: string) => {
+      if (!data || disposed) return
+      inputBufferRef.current += data
+      const isImmediate =
+        data.includes('\r') ||
+        data.includes('\n') ||
+        data.includes('\u0003') ||
+        data.includes('\u0004') ||
+        data.includes('\u001b')
+      if (isImmediate || inputBufferRef.current.length >= 256) {
+        flushInput()
+        return
+      }
+      if (inputTimerRef.current === null) {
+        inputTimerRef.current = window.setTimeout(flushInput, 12)
+      }
+    }
 
     const setup = async () => {
       setSessionReady(false)
@@ -184,22 +248,25 @@ export function TerminalPane({
         term.writeln('\x1b[38;2;160;160;160mTerminal real hanya tersedia di aplikasi desktop.')
         term.writeln('Jalankan: pnpm desktop:dev\x1b[0m')
         term.write('\r\n$ ')
+        setSessionReady(true)
         return
       }
 
       const [offData, offExit, offSuspended] = await Promise.all([
         onPtyData(tab.id, (data) => {
-          if (!disposed) {
+          if (disposed) return
+          if (exitedRef.current) {
+            exitedRef.current = false
             setExited(false)
-            term.write(data)
           }
+          term.write(data)
         }),
         onPtyExit(tab.id, () => {
-          commandSentRef.current = false
+          exitedRef.current = true
           if (!disposed) setExited(true)
         }),
         onPtySuspended(tab.id, () => {
-          commandSentRef.current = false
+          inputBufferRef.current = ''
         }),
       ])
       if (disposed) {
@@ -209,19 +276,20 @@ export function TerminalPane({
         return
       }
       cleanups.push(offData, offExit, offSuspended)
-      setSessionReady(true)
 
-      term.onData((data) => {
-        void ptyWrite(tab.id, data).catch(() => undefined)
-      })
-      term.onBinary((data) => {
-        void ptyWrite(tab.id, data).catch(() => undefined)
-      })
-      term.onResize(({ cols, rows }) => {
+      const offInput = term.onData(queueInput)
+      const offBinary = term.onBinary((data) => queueInput(data))
+      const offResize = term.onResize(({ cols, rows }) => {
         void ptyResize(tab.id, cols, rows).catch(() => undefined)
       })
+      cleanups.push(
+        () => offInput.dispose(),
+        () => offBinary.dispose(),
+        () => offResize.dispose()
+      )
 
       await ensureSession()
+      if (!disposed) setSessionReady(true)
 
       try {
         resize()
@@ -235,7 +303,12 @@ export function TerminalPane({
     return () => {
       disposed = true
       observer.disconnect()
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
+      if (inputTimerRef.current !== null) window.clearTimeout(inputTimerRef.current)
+      inputTimerRef.current = null
+      inputBufferRef.current = ''
       cleanups.forEach((cleanup) => void cleanup())
+      webglAddon?.dispose()
       term.dispose()
       termRef.current = null
       fitRef.current = null
@@ -244,6 +317,10 @@ export function TerminalPane({
 
   useEffect(() => {
     if (active && visibleRef.current) termRef.current?.focus()
+  }, [active, visible])
+
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.cursorBlink = active && visible
   }, [active, visible])
 
   const startRename = () => {
@@ -276,10 +353,10 @@ export function TerminalPane({
   return (
     <div
       className={cn(
-        'flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-md border bg-[#080808]',
+        'relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-md border bg-[#080808]',
         active ? 'border-neutral-600' : 'border-neutral-800/80'
       )}
-      onMouseDown={onActivate}
+      onMouseDown={() => onActivate(tab.id)}
     >
       <div className='flex h-7 shrink-0 select-none items-center gap-1 border-b border-neutral-800/80 bg-neutral-950 px-2'>
         <span className='size-1.5 shrink-0 rounded-full bg-emerald-500/80' />
@@ -353,7 +430,7 @@ export function TerminalPane({
                 type='button'
                 role='menuitem'
                 onClick={() => {
-                  onActivate()
+                  onActivate(tab.id)
                   setMenuOpen(false)
                 }}
                 className={menuItemClass}
@@ -411,6 +488,12 @@ export function TerminalPane({
         className='min-h-0 flex-1 overflow-hidden px-1 py-0.5'
         onClick={() => termRef.current?.focus()}
       />
+      {isDesktop && !sessionReady && (
+        <div className='absolute inset-x-0 bottom-0 top-7 z-10 flex items-center justify-center gap-2 bg-[#080808]/95 text-[11px] text-neutral-500'>
+          <LoaderCircle className='size-3.5 animate-spin' />
+          Menyiapkan {tab.title}...
+        </div>
+      )}
     </div>
   )
-}
+})

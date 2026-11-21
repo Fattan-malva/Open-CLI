@@ -10,6 +10,9 @@ const dataHandlers = new Map<string, Set<Handler<Uint8Array>>>()
 const exitHandlers = new Map<string, Set<Handler<void>>>()
 const suspendHandlers = new Map<string, Set<Handler<void>>>()
 const pendingData = new Map<string, Uint8Array[]>()
+const pendingExits = new Set<string>()
+const pendingSuspends = new Set<string>()
+const MAX_PENDING_BYTES = 256 * 1024
 let listenersReady: Promise<void> | null = null
 let dataFrame = 0
 
@@ -20,9 +23,29 @@ function decode(value: string): Uint8Array {
   return bytes
 }
 
+function queuePendingData(id: string, chunk: Uint8Array) {
+  const chunks = pendingData.get(id) ?? []
+  chunks.push(chunk)
+  let total = chunks.reduce((sum, item) => sum + item.length, 0)
+  while (total > MAX_PENDING_BYTES && chunks.length > 1) {
+    total -= chunks.shift()?.length ?? 0
+  }
+  pendingData.set(id, chunks)
+}
+
+function scheduleFlush() {
+  if (dataFrame !== 0) return
+  if (typeof requestAnimationFrame === 'function') {
+    dataFrame = requestAnimationFrame(flushPendingData)
+  } else {
+    flushPendingData()
+  }
+}
+
 function flushPendingData() {
   dataFrame = 0
   for (const [id, chunks] of pendingData) {
+    if (!dataHandlers.has(id)) continue
     const length = chunks.reduce((total, chunk) => total + chunk.length, 0)
     const merged = new Uint8Array(length)
     let offset = 0
@@ -31,8 +54,8 @@ function flushPendingData() {
       offset += chunk.length
     }
     dataHandlers.get(id)?.forEach((handler) => handler(merged))
+    pendingData.delete(id)
   }
-  pendingData.clear()
 }
 
 async function ensureListeners() {
@@ -41,20 +64,18 @@ async function ensureListeners() {
 
   listenersReady = Promise.all([
     listen<PtyEvent>('pty:data', ({ payload }) => {
-      const chunks = pendingData.get(payload.id) ?? []
-      chunks.push(decode(payload.data))
-      pendingData.set(payload.id, chunks)
-      if (dataFrame === 0 && typeof requestAnimationFrame === 'function') {
-        dataFrame = requestAnimationFrame(flushPendingData)
-      } else if (dataFrame === 0) {
-        flushPendingData()
-      }
+      queuePendingData(payload.id, decode(payload.data))
+      if (dataHandlers.has(payload.id)) scheduleFlush()
     }),
     listen<PtyEvent>('pty:exit', ({ payload }) => {
-      exitHandlers.get(payload.id)?.forEach((handler) => handler())
+      const handlers = exitHandlers.get(payload.id)
+      if (handlers) handlers.forEach((handler) => handler())
+      else pendingExits.add(payload.id)
     }),
     listen<PtyEvent>('pty:suspended', ({ payload }) => {
-      suspendHandlers.get(payload.id)?.forEach((handler) => handler())
+      const handlers = suspendHandlers.get(payload.id)
+      if (handlers) handlers.forEach((handler) => handler())
+      else pendingSuspends.add(payload.id)
     }),
   ]).then(() => undefined)
 
@@ -73,17 +94,23 @@ function register<T>(map: Map<string, Set<Handler<T>>>, id: string, handler: Han
 
 export async function onPtyData(id: string, handler: Handler<Uint8Array>) {
   await ensureListeners()
-  return register(dataHandlers, id, handler)
+  const unregister = register(dataHandlers, id, handler)
+  if (pendingData.has(id)) scheduleFlush()
+  return unregister
 }
 
 export async function onPtyExit(id: string, handler: Handler<void>) {
   await ensureListeners()
-  return register(exitHandlers, id, handler)
+  const unregister = register(exitHandlers, id, handler)
+  if (pendingExits.delete(id)) handler()
+  return unregister
 }
 
 export async function onPtySuspended(id: string, handler: Handler<void>) {
   await ensureListeners()
-  return register(suspendHandlers, id, handler)
+  const unregister = register(suspendHandlers, id, handler)
+  if (pendingSuspends.delete(id)) handler()
+  return unregister
 }
 
 export function ptySpawn(
@@ -91,10 +118,18 @@ export function ptySpawn(
   cols: number,
   rows: number,
   shell: string,
-  cwd?: string
+  cwd?: string,
+  initialCommand?: string
 ) {
   if (!isDesktop) return Promise.resolve()
-  return invoke<void>('pty_spawn', { id, cols, rows, shell, cwd })
+  return invoke<void>('pty_spawn', {
+    id,
+    cols,
+    rows,
+    shell,
+    cwd,
+    ...(initialCommand ? { initialCommand } : {}),
+  })
 }
 
 export function ptyEnsure(
@@ -102,10 +137,18 @@ export function ptyEnsure(
   cols: number,
   rows: number,
   shell: string,
-  cwd?: string
+  cwd?: string,
+  initialCommand?: string
 ) {
   if (!isDesktop) return Promise.resolve(false)
-  return invoke<boolean>('pty_ensure', { id, cols, rows, shell, cwd })
+  return invoke<boolean>('pty_ensure', {
+    id,
+    cols,
+    rows,
+    shell,
+    cwd,
+    ...(initialCommand ? { initialCommand } : {}),
+  })
 }
 
 export function ptyWrite(id: string, data: string) {
