@@ -712,6 +712,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!visible) return
       if (!shouldHandleShortcut(event.target)) return
       if (event.ctrlKey && event.altKey && !event.shiftKey) {
         const shell = shells.find(
@@ -743,7 +744,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
         !event.altKey &&
         event.key.toLowerCase() === 'b'
       ) {
-        if (!visible) return
         event.preventDefault()
         event.stopPropagation()
         setBrowserOpen((open) => !open)

@@ -3,11 +3,41 @@ import { isDesktop } from './platform'
 
 export const BROWSER_DATA_CLEARED_EVENT = 'opencli:browser-data-cleared'
 
+let browserCommandTail: Promise<unknown> = Promise.resolve()
+
+function enqueueBrowserCommand<T>(run: () => Promise<T>): Promise<T> {
+  const result = browserCommandTail.then(run, run)
+  browserCommandTail = result.catch(() => undefined)
+  return result
+}
+
 export type BrowserBounds = {
   x: number
   y: number
   width: number
   height: number
+}
+
+type BrowserVisibility = {
+  active: boolean
+  bounds: BrowserBounds
+}
+
+const FALLBACK_BOUNDS: BrowserBounds = { x: 0, y: 0, width: 1, height: 1 }
+const browserVisibility = new Map<string, BrowserVisibility>()
+
+function browserVisibilityPayload(fallback: BrowserBounds = FALLBACK_BOUNDS) {
+  let active: string | null = null
+  for (const [label, entry] of browserVisibility) {
+    if (entry.active) {
+      active = label
+      break
+    }
+  }
+  const bounds = active
+    ? browserVisibility.get(active)?.bounds ?? fallback
+    : fallback
+  return { labels: Array.from(browserVisibility.keys()), active, ...bounds }
 }
 
 export function normalizeBrowserUrl(value: string): string | null {
@@ -52,60 +82,82 @@ export function resolveBrowserTarget(value: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
 }
 
-export async function openEmbeddedBrowser(
+export function openEmbeddedBrowser(
   url: string,
   bounds: BrowserBounds
 ): Promise<void> {
-  if (!isDesktop) return
-  await invoke('browser_open', { url, ...bounds })
+  if (!isDesktop) return Promise.resolve()
+  return enqueueBrowserCommand(() => invoke('browser_open', { url, ...bounds }))
 }
 
-export async function setEmbeddedBrowserBounds(
-  bounds: BrowserBounds
-): Promise<void> {
-  if (!isDesktop) return
-  await invoke('browser_set_bounds', bounds)
+export function setEmbeddedBrowserBounds(bounds: BrowserBounds): Promise<void> {
+  if (!isDesktop) return Promise.resolve()
+  return enqueueBrowserCommand(() => invoke('browser_set_bounds', bounds))
 }
 
-export async function closeEmbeddedBrowser(): Promise<void> {
-  if (!isDesktop) return
-  await invoke('browser_close')
+export function closeEmbeddedBrowser(): Promise<void> {
+  if (!isDesktop) return Promise.resolve()
+  return enqueueBrowserCommand(() => invoke('browser_close'))
 }
 
-export async function createBrowserTab(
+export function createBrowserTab(
   label: string,
   url: string,
   bounds: BrowserBounds
 ): Promise<void> {
-  if (!isDesktop) return
-  await invoke('browser_tab_create', { label, url, ...bounds })
+  if (!isDesktop) return Promise.resolve()
+  const existing = browserVisibility.get(label)
+  browserVisibility.set(label, { active: existing?.active ?? false, bounds })
+  return enqueueBrowserCommand(async () => {
+    await invoke('browser_tab_create', { label, url, ...bounds })
+    await invoke('browser_tab_sync', browserVisibilityPayload(bounds))
+  })
 }
 
-export async function navigateBrowserTab(
-  label: string,
-  url: string
-): Promise<void> {
-  if (!isDesktop) return
-  await invoke('browser_tab_navigate', { label, url })
+export function navigateBrowserTab(label: string, url: string): Promise<void> {
+  if (!isDesktop) return Promise.resolve()
+  return enqueueBrowserCommand(async () => {
+    await invoke('browser_tab_navigate', { label, url })
+    await invoke('browser_tab_sync', browserVisibilityPayload())
+  })
 }
 
-export async function syncBrowserTabs(
+export function syncBrowserTabs(
   labels: string[],
   active: string | null,
   bounds: BrowserBounds
 ): Promise<void> {
-  if (!isDesktop) return
-  await invoke('browser_tab_sync', { labels, active, ...bounds })
+  if (!isDesktop) return Promise.resolve()
+  for (const label of labels) {
+    browserVisibility.set(label, { active: false, bounds })
+  }
+  if (active && browserVisibility.has(active)) {
+    browserVisibility.get(active)!.active = true
+    for (const [label, entry] of browserVisibility) {
+      if (label !== active) entry.active = false
+    }
+  }
+  return enqueueBrowserCommand(() =>
+    invoke('browser_tab_sync', browserVisibilityPayload(bounds))
+  )
 }
 
-export async function closeBrowserTab(label: string): Promise<void> {
-  if (!isDesktop) return
-  await invoke('browser_tab_close', { label })
+export function closeBrowserTab(label: string): Promise<void> {
+  if (!isDesktop) return Promise.resolve()
+  browserVisibility.delete(label)
+  return enqueueBrowserCommand(async () => {
+    await invoke('browser_tab_close', { label })
+    await invoke('browser_tab_sync', browserVisibilityPayload())
+  })
 }
 
-export async function closeAllBrowserTabs(): Promise<void> {
-  if (!isDesktop) return
-  await invoke('browser_tabs_close_all')
+export function closeAllBrowserTabs(): Promise<void> {
+  if (!isDesktop) return Promise.resolve()
+  browserVisibility.clear()
+  return enqueueBrowserCommand(async () => {
+    await invoke('browser_tabs_close_all')
+    await invoke('browser_tab_sync', browserVisibilityPayload())
+  })
 }
 
 export function notifyBrowserDataCleared() {
