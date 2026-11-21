@@ -27,7 +27,7 @@ import { useIdeTerminalStore } from './ide-terminal-store'
 import { formatCode, isFormatSupported, parserForPath } from './lib/prettier'
 import { useIdeStore } from './store'
 
-type DragKind = 'explorer' | 'terminal' | 'browser'
+type DragKind = 'explorer' | 'terminal' | 'terminalRail' | 'browser'
 
 type DragState = {
   kind: DragKind
@@ -42,6 +42,7 @@ export function IdeWorkspace({ visible }: { visible: boolean }) {
   const { toggleSidebar } = useSidebar()
 
   const root = useIdeStore((state) => state.root)
+  const rootRef = useRef(root)
   const files = useIdeStore((state) => state.files)
   const activePath = useIdeStore((state) => state.activePath)
   const layout = useIdeStore((state) => state.layout)
@@ -78,6 +79,17 @@ export function IdeWorkspace({ visible }: { visible: boolean }) {
       active = false
     }
   }, [setRoot])
+
+  useEffect(() => {
+    if (rootRef.current === root) return
+    rootRef.current = root
+    useIdeTerminalStore.getState().clear()
+    if (!useIdeStore.getState().layout.terminalOpen) return
+    const id = useIdeTerminalStore.getState().add(undefined, {
+      cwd: root ?? undefined,
+    })
+    useIdeTerminalStore.getState().setActive(id)
+  }, [root])
 
   const activeFile = files.find((file) => file.path === activePath) ?? null
 
@@ -172,21 +184,37 @@ export function IdeWorkspace({ visible }: { visible: boolean }) {
     setLayout({ explorerOpen: !open })
   }, [setLayout, setSidebarView])
 
+  const openTerminal = useCallback(() => {
+    const store = useIdeTerminalStore.getState()
+    if (store.tabs.length === 0) {
+      const id = store.add(undefined, { cwd: root ?? undefined })
+      useIdeTerminalStore.getState().setActive(id)
+    } else if (
+      !store.activeId ||
+      !store.tabs.some((tab) => tab.id === store.activeId)
+    ) {
+      store.setActive(store.tabs[0].id)
+    }
+    setLayout({ terminalOpen: true })
+  }, [root, setLayout])
+
   const toggleTerminal = useCallback(() => {
     const willOpen = !useIdeStore.getState().layout.terminalOpen
     setLayout({ terminalOpen: willOpen })
-    if (willOpen && useIdeTerminalStore.getState().tabs.length === 0) {
-      useIdeTerminalStore.getState().add()
-    }
-  }, [setLayout])
+    if (willOpen) openTerminal()
+  }, [openTerminal, setLayout])
 
   const toggleBrowser = useCallback(() => {
     setLayout({ browserOpen: !useIdeStore.getState().layout.browserOpen })
   }, [setLayout])
 
   const newTerminal = useCallback(() => {
-    useIdeTerminalStore.getState().add()
-  }, [])
+    const id = useIdeTerminalStore.getState().add(undefined, {
+      cwd: root ?? undefined,
+    })
+    useIdeTerminalStore.getState().setActive(id)
+    setLayout({ terminalOpen: true })
+  }, [root, setLayout])
 
   const cycleFile = useCallback(
     (direction: number) => {
@@ -297,7 +325,9 @@ export function IdeWorkspace({ visible }: { visible: boolean }) {
           ? layout.explorerWidth
           : kind === 'terminal'
             ? layout.terminalHeight
-            : layout.browserWidth
+            : kind === 'terminalRail'
+              ? layout.terminalRailWidth
+              : layout.browserWidth
       setDrag({ kind, start, startSize, size })
     },
     [layout]
@@ -325,10 +355,16 @@ export function IdeWorkspace({ visible }: { visible: boolean }) {
           ),
         })
       }
+      if (drag.kind === 'terminalRail') {
+        setLayout({
+          terminalRailWidth: Math.min(300, Math.max(96, drag.startSize - delta)),
+        })
+      }
       if (drag.kind === 'browser') {
+        const maxBrowserWidth = Math.max(320, drag.size - 320)
         setLayout({
           browserWidth: Math.min(
-            Math.max(900, window.innerWidth - 420),
+            maxBrowserWidth,
             Math.max(280, drag.startSize - delta)
           ),
         })
@@ -515,12 +551,26 @@ export function IdeWorkspace({ visible }: { visible: boolean }) {
                 style={{ height: layout.terminalHeight }}
                 className='min-h-0 shrink-0'
               >
-                <TerminalPanel visible={visible && layout.terminalOpen} />
+                <TerminalPanel
+                  visible={visible && layout.terminalOpen}
+                  railWidth={layout.terminalRailWidth}
+                  cwd={root ?? undefined}
+                  onRailResizeStart={(event) => startResize('terminalRail', event)}
+                />
               </div>
             </>
           )}
         </div>
 
+        {layout.browserOpen && (
+          <div
+            role='separator'
+            aria-orientation='vertical'
+            aria-label='Ubah lebar browser'
+            onPointerDown={(event) => startResize('browser', event)}
+            className='w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-sky-500/50'
+          />
+        )}
         <div
           className={cn(
             'relative min-h-0 shrink-0 border-l',
@@ -530,14 +580,6 @@ export function IdeWorkspace({ visible }: { visible: boolean }) {
         >
           <BrowserWorkspace embedded visible={layout.browserOpen && visible} />
         </div>
-        {layout.browserOpen && (
-          <div
-            role='separator'
-            aria-orientation='vertical'
-            onPointerDown={(event) => startResize('browser', event)}
-            className='w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-sky-500/50'
-          />
-        )}
       </div>
 
       <StatusBar

@@ -353,6 +353,20 @@ function WorkspacePane({
             <RotateCw className='size-4' />
           </Button>
         </div>
+      ) : visible ? (
+        <div className='flex h-9 shrink-0 items-center justify-end border-b px-2'>
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon'
+            aria-label='Muat ulang'
+            title='Muat ulang'
+            onClick={() => void reload()}
+            className='size-8 shrink-0'
+          >
+            <RotateCw className='size-4' />
+          </Button>
+        </div>
       ) : null}
 
       <div

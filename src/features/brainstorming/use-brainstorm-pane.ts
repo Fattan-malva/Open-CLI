@@ -4,6 +4,7 @@ import {
   BROWSER_DATA_CLEARED_EVENT,
   createBrowserTab,
   navigateBrowserTab,
+  repaintBrowserTab,
   syncBrowserTabs,
   type BrowserBounds,
 } from '@/lib/browser'
@@ -33,6 +34,10 @@ export function useBrainstormPane({
   const created = useRef(false)
   const pending = useRef(false)
   const currentUrl = useRef<string | null>(null)
+  const lastBounds = useRef<BrowserBounds | null>(null)
+  const lastSyncKey = useRef<string | null>(null)
+  const frame = useRef<number | null>(null)
+  const settleTimer = useRef<number | null>(null)
   const [version, setVersion] = useState(0)
   const url = app?.url ?? ''
   const enabled = visible && isDesktop && Boolean(label && url)
@@ -40,20 +45,17 @@ export function useBrainstormPane({
   const getBounds = useCallback((): BrowserBounds => {
     const rect = viewportRef.current?.getBoundingClientRect()
     if (rect && rect.width > 1 && rect.height > 1) {
-      return {
+      const bounds = {
         x: Math.round(rect.left),
         y: Math.round(rect.top),
         width: Math.round(rect.width),
         height: Math.round(rect.height),
       }
+      lastBounds.current = bounds
+      return bounds
     }
 
-    return {
-      x: 0,
-      y: 152,
-      width: Math.max(1, window.innerWidth),
-      height: Math.max(1, window.innerHeight - 152),
-    }
+    return lastBounds.current ?? { x: 0, y: 0, width: 1, height: 1 }
   }, [])
 
   const openTab = useCallback(async () => {
@@ -82,20 +84,41 @@ export function useBrainstormPane({
     throw lastError ?? new Error('Gagal membuka halaman.')
   }, [label, url, getBounds])
 
-  const sync = useCallback(() => {
+  const syncNow = useCallback(() => {
     if (!isDesktop || !created.current) return
     const active = enabled && !isWebviewOverlayOpen() ? label : null
-    void syncBrowserTabs([label], active, getBounds()).catch(() => undefined)
+    const bounds = getBounds()
+    const key = `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}:${active ?? ''}`
+    if (lastSyncKey.current === key) return
+    lastSyncKey.current = key
+    void syncBrowserTabs([label], active, bounds).catch(() => undefined)
   }, [enabled, label, getBounds])
 
-  useEffect(() => {
-    window.addEventListener(WEBVIEW_OVERLAY_EVENT, sync)
-    return () => window.removeEventListener(WEBVIEW_OVERLAY_EVENT, sync)
-  }, [sync])
+  const scheduleSync = useCallback(() => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current)
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null
+      syncNow()
+    })
+
+    if (settleTimer.current !== null) window.clearTimeout(settleTimer.current)
+    settleTimer.current = window.setTimeout(() => {
+      settleTimer.current = null
+      syncNow()
+      if (enabled && !isWebviewOverlayOpen()) {
+        void repaintBrowserTab(label, getBounds()).catch(() => undefined)
+      }
+    }, 120)
+  }, [enabled, label, getBounds, syncNow])
 
   useEffect(() => {
-    sync()
-  }, [sync, version])
+    window.addEventListener(WEBVIEW_OVERLAY_EVENT, syncNow)
+    return () => window.removeEventListener(WEBVIEW_OVERLAY_EVENT, syncNow)
+  }, [syncNow])
+
+  useEffect(() => {
+    syncNow()
+  }, [syncNow, version])
 
   useEffect(() => {
     if (!enabled || pending.current) return
@@ -142,6 +165,7 @@ export function useBrainstormPane({
     const reset = () => {
       created.current = false
       currentUrl.current = null
+      lastSyncKey.current = null
       setVersion((value) => value + 1)
     }
     window.addEventListener(BROWSER_DATA_CLEARED_EVENT, reset)
@@ -152,15 +176,17 @@ export function useBrainstormPane({
     const element = viewportRef.current
     if (!element || !isDesktop) return
 
-    const observer = new ResizeObserver(sync)
+    const observer = new ResizeObserver(scheduleSync)
     observer.observe(element)
-    window.addEventListener('resize', sync)
+    window.addEventListener('resize', scheduleSync)
 
     return () => {
       observer.disconnect()
-      window.removeEventListener('resize', sync)
+      window.removeEventListener('resize', scheduleSync)
+      if (frame.current !== null) cancelAnimationFrame(frame.current)
+      if (settleTimer.current !== null) window.clearTimeout(settleTimer.current)
     }
-  }, [sync])
+  }, [scheduleSync])
 
   const reload = useCallback(async () => {
     if (!isDesktop || !created.current || !url) return

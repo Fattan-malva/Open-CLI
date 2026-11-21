@@ -13,6 +13,7 @@ export type IdeSidebarView = 'explorer' | 'search'
 export type IdeLayout = {
   explorerWidth: number
   terminalHeight: number
+  terminalRailWidth: number
   browserWidth: number
   explorerOpen: boolean
   terminalOpen: boolean

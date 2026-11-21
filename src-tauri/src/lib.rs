@@ -1050,6 +1050,31 @@ async fn browser_tab_sync(
 }
 
 #[tauri::command]
+async fn browser_tab_repaint(
+    app: AppHandle,
+    label: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let webview = app
+            .get_webview(&label)
+            .ok_or_else(|| "tab browser tidak ditemukan".to_string())?;
+        webview
+            .set_bounds(browser_bounds(x, y, width, height))
+            .map_err(|error| error.to_string())?;
+        webview
+            .eval("window.dispatchEvent(new Event('resize'))")
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn browser_tab_close(app: AppHandle, label: String) -> Result<(), String> {
     let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
     let bridge_state = orchestrator::browser_bridge::BrowserBridgeState {
@@ -1584,6 +1609,7 @@ pub fn run() {
             browser_tab_create,
             browser_tab_navigate,
             browser_tab_sync,
+            browser_tab_repaint,
             browser_tab_close,
             browser_tabs_close_all,
             agent_cli_read,

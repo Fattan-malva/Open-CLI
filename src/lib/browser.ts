@@ -142,6 +142,18 @@ export function syncBrowserTabs(
   )
 }
 
+export function repaintBrowserTab(
+  label: string,
+  bounds: BrowserBounds
+): Promise<void> {
+  if (!isDesktop) return Promise.resolve()
+  const existing = browserVisibility.get(label)
+  browserVisibility.set(label, { active: existing?.active ?? false, bounds })
+  return enqueueBrowserCommand(() =>
+    invoke('browser_tab_repaint', { label, ...bounds })
+  )
+}
+
 export function closeBrowserTab(label: string): Promise<void> {
   if (!isDesktop) return Promise.resolve()
   browserVisibility.delete(label)

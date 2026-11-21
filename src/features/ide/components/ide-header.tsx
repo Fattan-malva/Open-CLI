@@ -117,7 +117,7 @@ export function IdeHeader({
         onClick: () => run(onToggleExplorer),
       },
       {
-        label: 'Toggle Terminal',
+        label: 'Tampilkan/Sembunyikan Terminal',
         shortcut: 'Ctrl+`',
         onClick: () => run(onToggleTerminal),
       },
@@ -138,7 +138,7 @@ export function IdeHeader({
         onClick: () => run(onNewTerminal),
       },
       {
-        label: 'Toggle Panel Terminal',
+        label: 'Tampilkan/Sembunyikan Terminal',
         shortcut: 'Ctrl+`',
         onClick: () => run(onToggleTerminal),
       },

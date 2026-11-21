@@ -14,6 +14,7 @@ const SETTINGS_KEY = 'opencli.ide.settings.v1'
 const DEFAULT_LAYOUT: IdeLayout = {
   explorerWidth: 260,
   terminalHeight: 220,
+  terminalRailWidth: 168,
   browserWidth: 420,
   explorerOpen: true,
   terminalOpen: true,
