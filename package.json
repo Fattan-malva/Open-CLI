@@ -6,6 +6,7 @@
   "scripts": {
     "version:sync": "node scripts/sync-version.mjs",
     "ide:icons": "node scripts/sync-material-icons.mjs",
+    "ide:icons:extract": "node scripts/extract-material-icons.mjs",
     "dev": "pnpm version:sync && vite",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
@@ -97,6 +98,7 @@
     "@vitest/browser-playwright": "^4.1.4",
     "@vitest/coverage-v8": "^4.1.4",
     "@vitest/ui": "^4.1.4",
+    "adm-zip": "^0.6.1",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",

@@ -6,10 +6,20 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
 import { playwright } from '@vitest/browser-playwright'
+import { extractMaterialIcons } from './scripts/material-icons-archive.mjs'
 
 const { version } = JSON.parse(
   readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')
 ) as { version: string }
+
+function materialIconsArchive() {
+  return {
+    name: 'material-icons-archive',
+    buildStart() {
+      extractMaterialIcons()
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -17,6 +27,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(version),
   },
   plugins: [
+    materialIconsArchive(),
     tanstackRouter({
       target: 'react',
       autoCodeSplitting: true,
@@ -33,7 +44,10 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ['**/src-tauri/target/**'],
+      ignored: [
+        '**/src-tauri/target/**',
+        '**/src/assets/material-icon-theme/icons/**',
+      ],
     },
   },
   test: {
