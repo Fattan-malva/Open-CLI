@@ -7,6 +7,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Instant;
 
 mod orchestrator;
+mod webview_power;
 mod system_monitor;
 mod user_tasks;
 
@@ -801,6 +802,7 @@ async fn browser_tab_create(
         let webview = window
             .add_child(
                 tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(target))
+                    .initialization_script(webview_power::POWER_INIT_SCRIPT)
                     .on_document_title_changed(move |_webview, title| {
                         let _ = title_app.emit(
                             BROWSER_TITLE_EVENT,
@@ -853,6 +855,21 @@ struct BrowserView {
 
 /// Applies the visibility and bounds of every known tab webview in one call.
 /// Each label is shown or hidden independently, so panes can be visible at once.
+/// Labels of tabs an agent currently controls through the browser bridge.
+fn agent_granted_labels(app: &AppHandle) -> Result<std::collections::HashSet<String>, String> {
+    let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0);
+    let grants = bridge.grants.lock().map_err(|error| error.to_string())?;
+    Ok(grants
+        .values()
+        .filter(|grant| grant.expires_at > now)
+        .map(|grant| grant.tab_label.clone())
+        .collect())
+}
+
 #[tauri::command]
 async fn browser_tabs_apply(
     app: AppHandle,
@@ -860,14 +877,18 @@ async fn browser_tabs_apply(
     focus: Option<String>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let granted = agent_granted_labels(&app)?;
         for view in views {
             let Some(webview) = app.get_webview(&view.label) else {
                 continue;
             };
             if !view.visible {
                 webview.hide().map_err(|error| error.to_string())?;
+                let pausable = !granted.contains(&view.label);
+                webview_power::apply(&webview, false, pausable);
                 continue;
             }
+            webview_power::apply(&webview, true, true);
             webview
                 .set_bounds(browser_bounds(view.x, view.y, view.width, view.height))
                 .map_err(|error| error.to_string())?;

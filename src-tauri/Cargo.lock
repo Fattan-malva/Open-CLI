@@ -2358,7 +2358,9 @@ dependencies = [
  "sysinfo",
  "tauri",
  "tauri-build",
+ "webview2-com",
  "winapi",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
