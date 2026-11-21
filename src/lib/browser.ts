@@ -33,6 +33,18 @@ function applyBrowserViews(focus: string | null = null): Promise<void> {
   )
 }
 
+// Hidden pages that were busy earlier (playing media, in a call) may become idle later,
+// so the native side re-checks them periodically. Each check is a single command.
+const POWER_REVIEW_MS = 30_000
+let powerReviewTimer: number | null = null
+
+function ensurePowerReview() {
+  if (powerReviewTimer !== null) return
+  powerReviewTimer = window.setInterval(() => {
+    if (browserViews.size > 0) void applyBrowserViews().catch(() => undefined)
+  }, POWER_REVIEW_MS)
+}
+
 export function normalizeBrowserUrl(value: string): string | null {
   const trimmed = value.trim()
   if (!trimmed) return null
@@ -82,6 +94,7 @@ export function createBrowserTab(
 ): Promise<void> {
   if (!isDesktop) return Promise.resolve()
   browserViews.set(label, { label, visible: false, ...bounds })
+  ensurePowerReview()
   return enqueueBrowserCommand(() =>
     invoke('browser_tab_create', { label, url, ...bounds })
   )
