@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Outlet, useLocation } from '@tanstack/react-router'
 import { getCookie } from '@/lib/cookies'
 import { cn } from '@/lib/utils'
@@ -13,6 +13,10 @@ import { SocialWorkspace } from '@/features/social'
 import { TerminalWorkspace } from '@/features/terminal'
 import { detachOrchestratorListeners } from '@/features/orchestrator/store'
 import { watchWebviewOverlays } from '@/lib/webview-overlay'
+
+const IdeWorkspace = lazy(() =>
+  import('@/features/ide').then((module) => ({ default: module.IdeWorkspace }))
+)
 
 type AuthenticatedLayoutProps = {
   children?: React.ReactNode
@@ -39,7 +43,9 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
             className={cn(
               '@container/content',
               'has-data-[layout=fixed]:h-svh',
-              'peer-data-[variant=inset]:has-data-[layout=fixed]:h-[calc(100svh-(var(--spacing)*4))]'
+              'peer-data-[variant=inset]:has-data-[layout=fixed]:h-[calc(100svh-(var(--spacing)*4))]',
+              pathname === '/ide' &&
+                'peer-data-[variant=inset]:has-data-[layout=fixed]:!h-svh md:!m-0 md:!rounded-none md:!shadow-none'
             )}
           >
             {children ?? <Outlet />}
@@ -47,6 +53,11 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
             <BrainstormingWorkspace visible={pathname === '/brainstorming'} />
             <SocialWorkspace site={socialSite} />
             <TerminalWorkspace visible={pathname === '/terminal'} />
+            {pathname === '/ide' && (
+              <Suspense fallback={null}>
+                <IdeWorkspace visible />
+              </Suspense>
+            )}
           </SidebarInset>
         </SidebarProvider>
       </LayoutProvider>

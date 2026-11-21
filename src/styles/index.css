@@ -156,3 +156,42 @@
 .animate-terminal-split {
   animation: terminal-split 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+.ide-codemirror .cm-editor {
+  height: 100%;
+}
+
+.ide-codemirror .cm-scroller {
+  font-family: Cascadia Mono, Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.ide-codemirror .cm-gutters {
+  background: color-mix(in srgb, var(--background) 96%, var(--foreground));
+  border-right: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.ide-codemirror .cm-activeLine,
+.ide-codemirror .cm-activeLineGutter {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.ide-codemirror .cm-content {
+  caret-color: var(--foreground);
+}
+
+.ide-codemirror .cm-focused {
+  outline: none;
+}
+
+.dark .ide-codemirror .cm-editor,
+.dark .ide-codemirror .cm-scroller,
+.dark .ide-codemirror .cm-content,
+.dark .ide-codemirror .cm-line,
+.dark .ide-codemirror .cm-gutters,
+.dark .ide-codemirror .cm-gutterElement,
+.dark .ide-codemirror .cm-activeLine,
+.dark .ide-codemirror .cm-activeLineGutter {
+  background-color: #000 !important;
+}

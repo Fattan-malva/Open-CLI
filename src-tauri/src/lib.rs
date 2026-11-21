@@ -67,6 +67,8 @@ const PTY_FLUSH_INTERVAL_MS: u128 = 16;
 const PTY_FLUSH_BYTES: usize = 64 * 1024;
 const PTY_READ_BUFFER: usize = 16 * 1024;
 const MAX_CONCURRENT_PTY_SPAWNS: usize = 2;
+const IDE_MAX_READ_BYTES: u64 = 2 * 1024 * 1024;
+const IDE_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
 
 fn now_millis() -> u64 {
     SystemTime::now()
@@ -120,6 +122,41 @@ struct FsEntry {
     name: String,
     path: String,
     kind: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdeDirEntry {
+    name: String,
+    path: String,
+    kind: String,
+    size: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdeTextFile {
+    path: String,
+    content: String,
+    size: u64,
+    binary: bool,
+    truncated: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdeTextMatch {
+    path: String,
+    line: usize,
+    column: usize,
+    preview: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdeFileMatch {
+    name: String,
+    path: String,
 }
 
 #[cfg(windows)]
@@ -1279,6 +1316,233 @@ fn fs_list_folders(path: String, query: Option<String>) -> Result<Vec<FsEntry>, 
     Ok(entries.into_iter().take(300).collect())
 }
 
+fn ide_skip_dir(name: &str) -> bool {
+    matches!(
+        name,
+        "node_modules"
+            | ".git"
+            | "dist"
+            | "target"
+            | "build"
+            | ".next"
+            | "release"
+            | "coverage"
+            | "EBWebView"
+            | "__pycache__"
+            | ".cache"
+            | "vendor"
+    )
+}
+
+fn ide_walk(root: &Path) -> ignore::Walk {
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .parents(true)
+        .max_depth(Some(32));
+    builder.filter_entry(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .map(|name| !ide_skip_dir(name))
+            .unwrap_or(true)
+    });
+    builder.build()
+}
+
+fn ide_default_root() -> PathBuf {
+    #[cfg(windows)]
+    {
+        PathBuf::from("C:\\")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/")
+    }
+}
+
+#[tauri::command]
+fn ide_fs_list_dir(path: String) -> Result<Vec<IdeDirEntry>, String> {
+    let target = if path.trim().is_empty() {
+        ide_default_root()
+    } else {
+        PathBuf::from(path)
+    };
+    let mut entries = Vec::new();
+
+    for item in fs::read_dir(&target).map_err(|error| error.to_string())? {
+        let item = item.map_err(|error| error.to_string())?;
+        let file_type = item.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        let kind = if file_type.is_dir() {
+            "folder"
+        } else if file_type.is_file() {
+            "file"
+        } else {
+            continue;
+        };
+        let name = item.file_name().to_string_lossy().to_string();
+        let size = if kind == "file" {
+            item.metadata().map(|data| data.len()).unwrap_or(0)
+        } else {
+            0
+        };
+
+        entries.push(IdeDirEntry {
+            name,
+            path: item.path().to_string_lossy().to_string(),
+            kind: kind.to_string(),
+            size,
+        });
+    }
+
+    entries.sort_by(|left, right| match (left.kind.as_str(), right.kind.as_str()) {
+        ("folder", "file") => std::cmp::Ordering::Less,
+        ("file", "folder") => std::cmp::Ordering::Greater,
+        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+    });
+    Ok(entries)
+}
+
+#[tauri::command]
+fn ide_fs_read_text(path: String) -> Result<IdeTextFile, String> {
+    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    let mut bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    let size = metadata.len();
+    let truncated = size > IDE_MAX_READ_BYTES;
+    if truncated {
+        bytes.truncate(IDE_MAX_READ_BYTES as usize);
+    }
+    let binary = bytes.iter().take(4096).any(|byte| *byte == 0);
+    let content = String::from_utf8_lossy(&bytes).into_owned();
+
+    Ok(IdeTextFile {
+        path,
+        content,
+        size,
+        binary,
+        truncated,
+    })
+}
+
+#[tauri::command]
+fn ide_fs_write_text(path: String, contents: String) -> Result<(), String> {
+    fs::write(&path, contents).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn ide_fs_search_text(
+    root: String,
+    query: String,
+    case_sensitive: Option<bool>,
+    limit: Option<usize>,
+) -> Result<Vec<IdeTextMatch>, String> {
+    let needle = query.trim().to_string();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let max = limit.unwrap_or(200).clamp(1, 1000);
+    let sensitive = case_sensitive.unwrap_or(false);
+    let lower_needle = needle.to_lowercase();
+    let mut results = Vec::new();
+
+    for entry in ide_walk(Path::new(&root)) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        if !entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+            continue;
+        }
+        if entry
+            .metadata()
+            .map(|data| data.len() > IDE_SEARCH_FILE_BYTES)
+            .unwrap_or(true)
+        {
+            continue;
+        }
+
+        let path = entry.path();
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        if bytes.iter().take(4096).any(|byte| *byte == 0) {
+            continue;
+        }
+        let content = String::from_utf8_lossy(&bytes);
+
+        for (line_index, line) in content.lines().enumerate() {
+            let found = if sensitive {
+                line.find(&needle)
+            } else {
+                line.to_lowercase().find(&lower_needle)
+            };
+            if let Some(column) = found {
+                results.push(IdeTextMatch {
+                    path: entry.path().to_string_lossy().to_string(),
+                    line: line_index + 1,
+                    column: column + 1,
+                    preview: line.chars().take(240).collect(),
+                });
+                if results.len() >= max {
+                    return Ok(results);
+                }
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+#[tauri::command]
+fn ide_fs_search_files(
+    root: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<IdeFileMatch>, String> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let max = limit.unwrap_or(150).clamp(1, 1000);
+    let mut results = Vec::new();
+
+    for entry in ide_walk(Path::new(&root)) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        if !entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+            continue;
+        }
+
+        let name = entry.file_name().to_string_lossy().to_string();
+        let full_path = entry.path().to_string_lossy().to_lowercase();
+        if !name.to_lowercase().contains(&needle) && !full_path.contains(&needle) {
+            continue;
+        }
+
+        results.push(IdeFileMatch {
+            name,
+            path: entry.path().to_string_lossy().to_string(),
+        });
+        if results.len() >= max {
+            break;
+        }
+    }
+
+    Ok(results)
+}
+
 fn dev_data_root() -> Option<PathBuf> {
     if !cfg!(debug_assertions) {
         return None;
@@ -1332,6 +1596,11 @@ pub fn run() {
             app_uninstall,
             fs_list_drives,
             fs_list_folders,
+            ide_fs_list_dir,
+            ide_fs_read_text,
+            ide_fs_write_text,
+            ide_fs_search_text,
+            ide_fs_search_files,
             orchestrator::commands::orchestrator_snapshot,
             orchestrator::commands::orchestrator_upsert_run,
             orchestrator::commands::orchestrator_upsert_task,

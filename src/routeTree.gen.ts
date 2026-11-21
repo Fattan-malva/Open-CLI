@@ -25,6 +25,7 @@ import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authentic
 import { Route as AuthenticatedTerminalIndexRouteImport } from './routes/_authenticated/terminal/index'
 import { Route as AuthenticatedTasksIndexRouteImport } from './routes/_authenticated/tasks/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedIdeIndexRouteImport } from './routes/_authenticated/ide/index'
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
 import { Route as AuthenticatedBrowserIndexRouteImport } from './routes/_authenticated/browser/index'
 import { Route as AuthenticatedBrainstormingIndexRouteImport } from './routes/_authenticated/brainstorming/index'
@@ -123,6 +124,11 @@ const AuthenticatedSettingsIndexRoute =
     path: '/',
     getParentRoute: () => AuthenticatedSettingsRouteRoute,
   } as any)
+const AuthenticatedIdeIndexRoute = AuthenticatedIdeIndexRouteImport.update({
+  id: '/ide/',
+  path: '/ide/',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedHelpCenterIndexRoute =
   AuthenticatedHelpCenterIndexRouteImport.update({
     id: '/help-center/',
@@ -239,6 +245,7 @@ export interface FileRoutesByFullPath {
   '/brainstorming/': typeof AuthenticatedBrainstormingIndexRoute
   '/browser/': typeof AuthenticatedBrowserIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
+  '/ide/': typeof AuthenticatedIdeIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/tasks/': typeof AuthenticatedTasksIndexRoute
   '/terminal/': typeof AuthenticatedTerminalIndexRoute
@@ -270,6 +277,7 @@ export interface FileRoutesByTo {
   '/brainstorming': typeof AuthenticatedBrainstormingIndexRoute
   '/browser': typeof AuthenticatedBrowserIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
+  '/ide': typeof AuthenticatedIdeIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/tasks': typeof AuthenticatedTasksIndexRoute
   '/terminal': typeof AuthenticatedTerminalIndexRoute
@@ -304,6 +312,7 @@ export interface FileRoutesById {
   '/_authenticated/brainstorming/': typeof AuthenticatedBrainstormingIndexRoute
   '/_authenticated/browser/': typeof AuthenticatedBrowserIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
+  '/_authenticated/ide/': typeof AuthenticatedIdeIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
   '/_authenticated/terminal/': typeof AuthenticatedTerminalIndexRoute
@@ -338,6 +347,7 @@ export interface FileRouteTypes {
     | '/brainstorming/'
     | '/browser/'
     | '/help-center/'
+    | '/ide/'
     | '/settings/'
     | '/tasks/'
     | '/terminal/'
@@ -369,6 +379,7 @@ export interface FileRouteTypes {
     | '/brainstorming'
     | '/browser'
     | '/help-center'
+    | '/ide'
     | '/settings'
     | '/tasks'
     | '/terminal'
@@ -402,6 +413,7 @@ export interface FileRouteTypes {
     | '/_authenticated/brainstorming/'
     | '/_authenticated/browser/'
     | '/_authenticated/help-center/'
+    | '/_authenticated/ide/'
     | '/_authenticated/settings/'
     | '/_authenticated/tasks/'
     | '/_authenticated/terminal/'
@@ -534,6 +546,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/'
       preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedSettingsRouteRoute
+    }
+    '/_authenticated/ide/': {
+      id: '/_authenticated/ide/'
+      path: '/ide'
+      fullPath: '/ide/'
+      preLoaderRoute: typeof AuthenticatedIdeIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/help-center/': {
       id: '/_authenticated/help-center/'
@@ -682,6 +701,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedBrainstormingIndexRoute: typeof AuthenticatedBrainstormingIndexRoute
   AuthenticatedBrowserIndexRoute: typeof AuthenticatedBrowserIndexRoute
   AuthenticatedHelpCenterIndexRoute: typeof AuthenticatedHelpCenterIndexRoute
+  AuthenticatedIdeIndexRoute: typeof AuthenticatedIdeIndexRoute
   AuthenticatedTasksIndexRoute: typeof AuthenticatedTasksIndexRoute
   AuthenticatedTerminalIndexRoute: typeof AuthenticatedTerminalIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
@@ -699,6 +719,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedBrainstormingIndexRoute: AuthenticatedBrainstormingIndexRoute,
   AuthenticatedBrowserIndexRoute: AuthenticatedBrowserIndexRoute,
   AuthenticatedHelpCenterIndexRoute: AuthenticatedHelpCenterIndexRoute,
+  AuthenticatedIdeIndexRoute: AuthenticatedIdeIndexRoute,
   AuthenticatedTasksIndexRoute: AuthenticatedTasksIndexRoute,
   AuthenticatedTerminalIndexRoute: AuthenticatedTerminalIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,

@@ -1,6 +1,7 @@
 import {
   Bot,
   Brain,
+  Code2,
   Globe,
   HelpCircle,
   LayoutDashboard,
@@ -43,6 +44,11 @@ export const sidebarData: SidebarData = {
           title: 'Terminal',
           url: '/terminal',
           icon: Terminal,
+        },
+        {
+          title: 'IDE',
+          url: '/ide',
+          icon: Code2,
         },
         {
           title: 'Browser',
