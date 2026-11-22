@@ -231,14 +231,7 @@ fn ensure_agent_session(
         return Ok(());
     }
     let (shell, cwd, command) = agent_launch(store, session_id)?;
-    crate::ensure_pty_session_with_command(
-        app,
-        pty,
-        session_id,
-        shell,
-        cwd,
-        command.as_deref(),
-    )?;
+    crate::ensure_pty_session_with_command(app, pty, session_id, shell, cwd, command.as_deref())?;
     Ok(())
 }
 
@@ -445,4 +438,3 @@ pub async fn orchestrator_browser_bridge_stop(
 ) -> Result<(), String> {
     browser_bridge::stop(&browser, &token)
 }
-

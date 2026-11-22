@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { Brain, GripVertical, Plug, RotateCw } from 'lucide-react'
+import { BrowserSnapshot } from '@/components/browser-snapshot'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
 import { Button } from '@/components/ui/button'
@@ -388,6 +389,7 @@ function WorkspacePane({
           visible ? 'bg-background' : 'bg-transparent'
         )}
       >
+        <BrowserSnapshot key={label} label={label} />
         {!isDesktop && visible ? (
           <div className='flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground'>
             Halaman brainstorming hanya tersedia pada aplikasi desktop.

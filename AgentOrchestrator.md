@@ -4,9 +4,9 @@ Date: 2026-11-20
 
 ## 1. Implemented capabilities
 
-- Additive Orchestrator Mode in the existing Terminal workspace; Terminal Only remains default and terminal/browser sessions are preserved.
+- Agent/Orchestrator is a left-side mode switch; Browser is a separate toggle for a resizable right-side panel, plus a full Browser page under Workspace. The group list is resizable too. Terminal remains focused on terminals and native Agent CLI sessions.
 - App-launched Agent CLI sessions are tagged with `agentId`; agent registry syncs live PTY busy state.
-- Chat-driven run creation with browser page/element context and attachment names.
+- Chat-driven run creation with browser page context and attachment names.
 - Planner protocol: coordinator native CLI writes `plan.json`; orchestrator validates schema, DAG, dependencies, scope overlap, acceptance criteria and risk.
 - Bounded scheduler with global concurrency limit, retry limit, capability check, per-task workspace ownership and dependency unblocking.
 - Real PTY dispatch of prompts into tagged native Agent CLI sessions; no simulated agent output.
@@ -14,8 +14,8 @@ Date: 2026-11-20
 - Git worktree isolation, status/diff collection, patch-based controlled integration with conflict reporting.
 - Evidence-based validation (summary, acceptance checklist, command exit codes, changed files) and final report artifact.
 - Cancellation propagation from UI into run/task states and dispatch loop.
-- Explicit per-tab/per-agent browser bridge token with loopback JSON-RPC tools and revocation.
-- Inspect Element flow with sanitized element context and no layout-changing UI beyond a temporary outline.
+- Explicit per-tab/per-agent browser bridge token with authenticated loopback JSON tools, generated agent instructions, expiry and revocation.
+- Browser overlays keep a last-frame snapshot while native webviews are temporarily hidden, so dialogs and tooltips remain readable without blank panes.
 - Retry, integrate and revoke controls are wired to real native commands/state transitions.
 
 ## 2. Architecture and files changed
@@ -41,8 +41,10 @@ Date: 2026-11-20
 ### Modified frontend files
 
 - `src/features/terminal/store.ts`: `TerminalTab.agentId` and `add()` option.
-- `src/features/terminal/index.tsx`: launcher tags sessions; mode switch, hydration, agent sync and dock mount.
-- `src/features/browser/index.tsx`: Share with Agent, Inspect Element and revoke controls in the existing toolbar.
+- `src/features/terminal/index.tsx`: launcher tags sessions and terminal-only keyboard shortcuts.
+- `src/features/agent-groups/index.tsx`: Agent, Browser and Orchestrator tabs with bridge grant visibility.
+- `src/features/browser/index.tsx`: Share with Agent, snapshot placeholder and revoke controls in the existing toolbar.
+- `src/features/browser/bridge-controls.tsx`: agent picker, token reveal/copy, generated agent instructions and revocation.
 
 ### New native modules
 
@@ -66,7 +68,7 @@ Date: 2026-11-20
 
 - Built-in and custom entries from the existing Agent CLI settings are supported when launched from OpenCLI terminal.
 - Capabilities are conservatively advertised as `*`; structured A2A capability negotiation is not implemented and is never assumed.
-- Browser capability is a local loopback bridge, not MCP/A2A. Tools: navigate, read, click, type, scroll, waitFor, inspectState, snapshot.
+- Browser capability is a local loopback bridge, not MCP/A2A. Tools: navigate, read, click, type, scroll, waitFor, snapshot. Requests require a bearer/token header.
 - Worktree integration is patch-based (`git apply --3way`) and does not auto-commit or auto-push.
 - Dirty repositories are flagged for review. Conflicts are surfaced, not resolved arbitrarily.
 - Live end-to-end verification with a real external Agent CLI was not possible in this environment; protocol, commands, build and unit tests were verified.

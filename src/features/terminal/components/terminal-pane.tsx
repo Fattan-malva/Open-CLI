@@ -86,9 +86,11 @@ export const TerminalPane = memo(function TerminalPane({
         tab.cwd,
         tab.command || undefined
       )
-    } catch {
+    } catch (error) {
       if (visibleRef.current) {
-        termRef.current?.writeln('Gagal memulai shell. Periksa pengaturan shell.')
+        const detail = error instanceof Error ? error.message : String(error)
+        termRef.current?.writeln(`Gagal memulai shell: ${detail}`)
+        termRef.current?.writeln('Periksa pengaturan shell dan folder proyek.')
       }
     }
   }, [tab.id, tab.shell, tab.cwd, tab.command])

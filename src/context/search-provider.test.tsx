@@ -3,6 +3,26 @@ import { render, type RenderResult } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { SearchProvider } from '@/context/search-provider'
 
+vi.mock('@/components/layout/data/sidebar-data', () => ({
+  sidebarData: {
+    user: { name: 'Test', email: 'test@example.com', avatar: '' },
+    teams: [],
+    navGroups: [
+      {
+        title: 'Workspace',
+        items: [
+          { title: 'Dashboard', url: '/' },
+          { title: 'Tasks', url: '/tasks' },
+          {
+            title: 'Settings',
+            items: [{ title: 'Account', url: '/settings/account' }],
+          },
+        ],
+      },
+    ],
+  },
+}))
+
 const COMMAND_MENU_PLACEHOLDER = 'Type a command or search...'
 
 const mocks = vi.hoisted(() => ({

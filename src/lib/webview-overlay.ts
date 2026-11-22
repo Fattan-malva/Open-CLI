@@ -1,12 +1,15 @@
 export const WEBVIEW_OVERLAY_EVENT = 'opencli:webview-overlay'
 
 const OVERLAY_SELECTOR = [
+  '[data-slot="sheet-content"][data-state="open"]',
   '[data-slot="popover-content"][data-state="open"]',
   '[data-slot="dropdown-menu-content"][data-state="open"]',
   '[data-slot="select-content"][data-state="open"]',
   '[data-slot="context-menu-content"][data-state="open"]',
   '[role="dialog"][data-state="open"]',
   '[role="alertdialog"][data-state="open"]',
+  '[role="menu"]:not([hidden]):not([aria-hidden="true"])',
+  '[role="listbox"]:not([hidden]):not([aria-hidden="true"])',
 ].join(',')
 
 let overlayOpen = false

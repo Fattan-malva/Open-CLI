@@ -52,6 +52,25 @@ function fileName(path: string) {
   return path.replace(/\\/g, '/').split('/').pop() || path
 }
 
+function normalizedPath(path: string) {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function pathWithin(path: string, parent: string) {
+  const current = normalizedPath(path)
+  const root = normalizedPath(parent)
+  return current === root || current.startsWith(`${root}/`)
+}
+
+function renamePathPrefix(path: string, from: string, to: string): string | null {
+  const current = normalizedPath(path)
+  const oldRoot = normalizedPath(from)
+  if (current === oldRoot) return to
+  if (!pathWithin(current, oldRoot)) return null
+  const next = `${to}${current.slice(oldRoot.length)}`
+  return to.includes('\\') ? next.replace(/\//g, '\\') : next
+}
+
 type IdeState = {
   root: string | null
   files: IdeFile[]
@@ -65,6 +84,8 @@ type IdeState = {
   updateContent: (path: string, content: string) => void
   markSaved: (path: string) => void
   closeFile: (path: string) => void
+  renamePath: (from: string, to: string) => void
+  removePath: (path: string) => void
   setActive: (path: string | null) => void
   toggleFolder: (path: string) => void
   setSidebarView: (view: IdeSidebarView) => void
@@ -138,6 +159,38 @@ export const useIdeStore = create<IdeState>((set, get) => ({
       }
       return { files, activePath }
     }),
+
+  renamePath: (from, to) =>
+    set((state) => ({
+      files: state.files.map((file) => {
+        const nextPath = renamePathPrefix(file.path, from, to)
+        if (!nextPath) return file
+        return {
+          ...file,
+          path: nextPath,
+          name: fileName(nextPath),
+          language: languageForPath(nextPath),
+        }
+      }),
+      activePath: state.activePath
+        ? renamePathPrefix(state.activePath, from, to) ?? state.activePath
+        : null,
+      expandedFolders: state.expandedFolders.map(
+        (path) => renamePathPrefix(path, from, to) ?? path
+      ),
+    })),
+
+  removePath: (path) =>
+    set((state) => ({
+      files: state.files.filter((file) => !pathWithin(file.path, path)),
+      activePath:
+        state.activePath && pathWithin(state.activePath, path)
+          ? null
+          : state.activePath,
+      expandedFolders: state.expandedFolders.filter(
+        (item) => !pathWithin(item, path)
+      ),
+    })),
 
   setActive: (activePath) => set({ activePath }),
 

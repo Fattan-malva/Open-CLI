@@ -4,13 +4,13 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 mod agent_groups;
 mod orchestrator;
-mod webview_power;
 mod system_monitor;
 mod user_tasks;
+mod webview_power;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -36,8 +36,6 @@ use winapi::um::jobapi2::{
     AssignProcessToJobObject, CreateJobObjectW, QueryInformationJobObject, SetInformationJobObject,
     TerminateJobObject,
 };
-#[cfg(windows)]
-use winapi::um::sysinfoapi::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 #[cfg(windows)]
 use winapi::um::tlhelp32::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
@@ -388,11 +386,21 @@ fn spawn_pty_session(
 ) -> Result<(), String> {
     // A fresh spawn request supersedes any kill/suspend issued before it.
     state.cancelled.lock().unwrap().remove(id);
-    {
+    let already_starting = {
         let mut starting = state.starting.lock().unwrap();
-        if state.sessions.lock().unwrap().contains_key(id) || !starting.insert(id.to_string()) {
+        if state.sessions.lock().unwrap().contains_key(id) {
             return Ok(());
         }
+        !starting.insert(id.to_string())
+    };
+    if already_starting {
+        for _ in 0..50 {
+            if state.sessions.lock().unwrap().contains_key(id) {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        return Ok(());
     }
     // Releases the `starting` marker on every exit path, including early returns.
     let _starting = StartingGuard { state, id };
@@ -412,7 +420,10 @@ fn spawn_pty_session(
             })
             .map_err(|e| e.to_string())?;
 
-        let shell = shell.unwrap_or_else(|| "powershell.exe".to_string());
+        let shell = shell
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "powershell.exe".to_string());
         let shell_lower = shell.to_lowercase();
         let startup_command = initial_command.filter(|value| !value.trim().is_empty());
         let mut cmd = CommandBuilder::new(&shell);
@@ -436,6 +447,9 @@ fn spawn_pty_session(
         }
         cmd.env("TERM", "xterm-256color");
         if let Some(dir) = cwd.as_deref() {
+            if !Path::new(dir).is_dir() {
+                return Err(format!("Working directory not found: {dir}"));
+            }
             cmd.cwd(dir);
         }
 
@@ -639,18 +653,15 @@ async fn pty_is_busy(state: State<'_, PtyState>, id: String) -> Result<bool, Str
         #[cfg(not(windows))]
         return Ok(true);
 
-        Ok(false)
+        #[cfg(windows)]
+        return Ok(false);
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-async fn pty_kill(
-    app: AppHandle,
-    state: State<'_, PtyState>,
-    id: String,
-) -> Result<(), String> {
+async fn pty_kill(app: AppHandle, state: State<'_, PtyState>, id: String) -> Result<(), String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         state.cancel_pending_spawn(&id);
@@ -758,10 +769,10 @@ fn close_browser_webviews(app: &AppHandle) -> Result<(), String> {
     let bridge_state = orchestrator::browser_bridge::BrowserBridgeState {
         grants: bridge.grants.clone(),
         stops: bridge.stops.clone(),
-        inspects: bridge.inspects.clone(),
     };
     for label in labels {
         orchestrator::browser_bridge::stop_for_tab(&bridge_state, &label)?;
+        webview_power::forget(&label);
         if let Some(webview) = app.get_webview(&label) {
             webview.close().map_err(|error| error.to_string())?;
         }
@@ -930,20 +941,31 @@ async fn browser_tab_repaint(
 }
 
 #[tauri::command]
+async fn browser_tab_snapshot(app: AppHandle, label: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let webview = app
+            .get_webview(&label)
+            .ok_or_else(|| "tab browser tidak ditemukan".to_string())?;
+        webview_power::capture_png(&webview).ok_or_else(|| "gambar tab tidak tersedia".to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn browser_tab_close(app: AppHandle, label: String) -> Result<(), String> {
     let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
     let bridge_state = orchestrator::browser_bridge::BrowserBridgeState {
         grants: bridge.grants.clone(),
         stops: bridge.stops.clone(),
-        inspects: bridge.inspects.clone(),
     };
     orchestrator::browser_bridge::stop_for_tab(&bridge_state, &label)?;
+    webview_power::forget(&label);
     if let Some(webview) = app.get_webview(&label) {
         webview.close().map_err(|error| error.to_string())?;
     }
     Ok(())
 }
-
 
 fn agent_cli_path(app: &AppHandle) -> Result<PathBuf, String> {
     let root = app
@@ -1276,11 +1298,13 @@ fn ide_fs_list_dir(path: String) -> Result<Vec<IdeDirEntry>, String> {
         });
     }
 
-    entries.sort_by(|left, right| match (left.kind.as_str(), right.kind.as_str()) {
-        ("folder", "file") => std::cmp::Ordering::Less,
-        ("file", "folder") => std::cmp::Ordering::Greater,
-        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-    });
+    entries.sort_by(
+        |left, right| match (left.kind.as_str(), right.kind.as_str()) {
+            ("folder", "file") => std::cmp::Ordering::Less,
+            ("file", "folder") => std::cmp::Ordering::Greater,
+            _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+        },
+    );
     Ok(entries)
 }
 
@@ -1310,6 +1334,107 @@ fn ide_fs_write_text(path: String, contents: String) -> Result<(), String> {
     fs::write(&path, contents).map_err(|error| error.to_string())
 }
 
+fn ide_validate_entry_name(name: &str) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed != name {
+        return Err("Nama tidak boleh kosong atau memiliki spasi di tepi".to_string());
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err("Nama tidak valid".to_string());
+    }
+    if trimmed
+        .chars()
+        .any(|value| value.is_control() || "\\/:*?\"<>|".contains(value))
+    {
+        return Err("Nama mengandung karakter yang tidak diizinkan".to_string());
+    }
+    Ok(())
+}
+
+fn ide_canonical_dir(path: &str) -> Result<PathBuf, String> {
+    let candidate = if path.trim().is_empty() {
+        ide_default_root()
+    } else {
+        PathBuf::from(path)
+    };
+    let canonical = fs::canonicalize(candidate).map_err(|error| error.to_string())?;
+    if !canonical.is_dir() {
+        return Err("Path bukan folder".to_string());
+    }
+    Ok(canonical)
+}
+
+fn ide_ensure_within(root: &Path, target: &Path) -> Result<PathBuf, String> {
+    let canonical = fs::canonicalize(target).map_err(|error| error.to_string())?;
+    if canonical == root || canonical.starts_with(root) {
+        Ok(canonical)
+    } else {
+        Err("Path berada di luar workspace".to_string())
+    }
+}
+
+#[tauri::command]
+fn ide_fs_create(
+    root: String,
+    parent: String,
+    name: String,
+    kind: String,
+) -> Result<String, String> {
+    ide_validate_entry_name(&name)?;
+    let root_path = ide_canonical_dir(&root)?;
+    let parent_path = ide_ensure_within(&root_path, &PathBuf::from(parent))?;
+    if !parent_path.is_dir() {
+        return Err("Path bukan folder".to_string());
+    }
+    let target = parent_path.join(&name);
+    if target.exists() {
+        return Err("Nama sudah digunakan".to_string());
+    }
+    match kind.as_str() {
+        "file" => fs::write(&target, "").map_err(|error| error.to_string())?,
+        "folder" => fs::create_dir(&target).map_err(|error| error.to_string())?,
+        _ => return Err("Jenis entry tidak dikenal".to_string()),
+    }
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn ide_fs_rename(root: String, path: String, name: String) -> Result<String, String> {
+    ide_validate_entry_name(&name)?;
+    let root_path = ide_canonical_dir(&root)?;
+    let source = ide_ensure_within(&root_path, &PathBuf::from(path))?;
+    if source == root_path {
+        return Err("Root workspace tidak bisa diganti nama".to_string());
+    }
+    if source.file_name().and_then(|value| value.to_str()) == Some(name.as_str()) {
+        return Ok(source.to_string_lossy().to_string());
+    }
+    let target = source
+        .parent()
+        .ok_or_else(|| "Path induk tidak ditemukan".to_string())?
+        .join(&name);
+    if target.exists() {
+        return Err("Nama sudah digunakan".to_string());
+    }
+    fs::rename(&source, &target).map_err(|error| error.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn ide_fs_delete(root: String, path: String) -> Result<(), String> {
+    let root_path = ide_canonical_dir(&root)?;
+    let target = ide_ensure_within(&root_path, &PathBuf::from(path))?;
+    if target == root_path {
+        return Err("Root workspace tidak bisa dihapus".to_string());
+    }
+    let metadata = fs::symlink_metadata(&target).map_err(|error| error.to_string())?;
+    if metadata.is_dir() {
+        fs::remove_dir_all(&target).map_err(|error| error.to_string())
+    } else {
+        fs::remove_file(&target).map_err(|error| error.to_string())
+    }
+}
+
 #[tauri::command]
 fn ide_fs_search_text(
     root: String,
@@ -1332,7 +1457,11 @@ fn ide_fs_search_text(
             Ok(entry) => entry,
             Err(_) => continue,
         };
-        if !entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+        if !entry
+            .file_type()
+            .map(|kind| kind.is_file())
+            .unwrap_or(false)
+        {
             continue;
         }
         if entry
@@ -1395,7 +1524,11 @@ fn ide_fs_search_files(
             Ok(entry) => entry,
             Err(_) => continue,
         };
-        if !entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+        if !entry
+            .file_type()
+            .map(|kind| kind.is_file())
+            .unwrap_or(false)
+        {
             continue;
         }
 
@@ -1455,6 +1588,7 @@ pub fn run() {
             browser_tab_navigate,
             browser_tabs_apply,
             browser_tab_repaint,
+            browser_tab_snapshot,
             browser_tab_close,
             agent_cli_read,
             agent_cli_write,
@@ -1469,6 +1603,9 @@ pub fn run() {
             ide_fs_list_dir,
             ide_fs_read_text,
             ide_fs_write_text,
+            ide_fs_create,
+            ide_fs_rename,
+            ide_fs_delete,
             ide_fs_search_text,
             ide_fs_search_files,
             user_tasks::user_task_list,

@@ -9,6 +9,17 @@ import { ThemeProvider } from '@/context/theme-provider'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { ConfigDrawer } from './config-drawer'
 
+function cookieValue(name: string): string | undefined {
+  const raw = getCookie(name)
+  if (raw === undefined) return undefined
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return typeof parsed === 'string' ? parsed : raw
+  } catch {
+    return raw
+  }
+}
+
 async function renderConfigDrawer({
   sidebarDefaultOpen = true,
 }: {
@@ -80,22 +91,23 @@ describe('ConfigDrawer (integration)', () => {
       await vi.waitFor(() =>
         expect(document.documentElement.classList.contains('light')).toBe(true)
       )
-      expect(getCookie('vite-ui-theme')).toBe('light')
+      expect(cookieValue('vite-ui-theme')).toBe('light')
     })
 
     it('applies dark theme to <html> and cookie', async () => {
+      setCookie('vite-ui-theme', JSON.stringify('light'))
       const screen = await renderConfigDrawer()
       await openDrawer(screen)
       await userEvent.click(screen.getByRole('radio', { name: /select dark/i }))
       await vi.waitFor(() =>
         expect(document.documentElement.classList.contains('dark')).toBe(true)
       )
-      expect(getCookie('vite-ui-theme')).toBe('dark')
+      expect(cookieValue('vite-ui-theme')).toBe('dark')
     })
 
     it('applies system theme: stores cookie and applies a resolved light or dark class', async () => {
       // Pre-seed light so mounted theme is not system; re-selecting System alone would not fire setTheme.
-      setCookie('vite-ui-theme', 'light')
+      setCookie('vite-ui-theme', JSON.stringify('light'))
 
       const screen = await renderConfigDrawer()
       await openDrawer(screen)
@@ -103,7 +115,7 @@ describe('ConfigDrawer (integration)', () => {
       await userEvent.click(
         screen.getByRole('radio', { name: /select system/i })
       )
-      await vi.waitFor(() => expect(getCookie('vite-ui-theme')).toBe('system'))
+      await vi.waitFor(() => expect(cookieValue('vite-ui-theme')).toBe('system'))
       await vi.waitFor(() => {
         const root = document.documentElement
         const hasLight = root.classList.contains('light')
@@ -122,7 +134,7 @@ describe('ConfigDrawer (integration)', () => {
         screen.getByRole('radio', { name: /select floating/i })
       )
       await vi.waitFor(() =>
-        expect(getCookie('layout_variant')).toBe('floating')
+        expect(cookieValue('layout_variant')).toBe('floating')
       )
     })
 
@@ -134,7 +146,7 @@ describe('ConfigDrawer (integration)', () => {
         screen.getByRole('radio', { name: /^select sidebar$/i })
       )
       await vi.waitFor(() =>
-        expect(getCookie('layout_variant')).toBe('sidebar')
+        expect(cookieValue('layout_variant')).toBe('sidebar')
       )
     })
 
@@ -146,13 +158,13 @@ describe('ConfigDrawer (integration)', () => {
         screen.getByRole('radio', { name: /select floating/i })
       )
       await vi.waitFor(() =>
-        expect(getCookie('layout_variant')).toBe('floating')
+        expect(cookieValue('layout_variant')).toBe('floating')
       )
 
       await userEvent.click(
         screen.getByRole('radio', { name: /select inset/i })
       )
-      await vi.waitFor(() => expect(getCookie('layout_variant')).toBe('inset'))
+      await vi.waitFor(() => expect(cookieValue('layout_variant')).toBe('inset'))
     })
   })
 
@@ -164,25 +176,27 @@ describe('ConfigDrawer (integration)', () => {
       screen.getByRole('radio', { name: /select full layout/i })
     )
     await vi.waitFor(() =>
-      expect(getCookie('layout_collapsible')).toBe('offcanvas')
+      expect(cookieValue('layout_collapsible')).toBe('offcanvas')
     )
-    await vi.waitFor(() => expect(getCookie('sidebar_state')).toBe('false'))
+    await vi.waitFor(() => expect(cookieValue('sidebar_state')).toBe('false'))
   })
 
   describe('section reset buttons', () => {
-    it('resets theme via section control after choosing dark', async () => {
+    it('resets theme via section control after choosing light', async () => {
       const screen = await renderConfigDrawer()
       await openDrawer(screen)
 
-      await userEvent.click(screen.getByRole('radio', { name: /select dark/i }))
-      await vi.waitFor(() => expect(getCookie('vite-ui-theme')).toBe('dark'))
+      await userEvent.click(
+        screen.getByRole('radio', { name: /select light/i })
+      )
+      await vi.waitFor(() => expect(cookieValue('vite-ui-theme')).toBe('light'))
 
       await userEvent.click(
         screen.getByRole('button', {
           name: /reset theme preference to default/i,
         })
       )
-      await vi.waitFor(() => expect(getCookie('vite-ui-theme')).toBe('system'))
+      await vi.waitFor(() => expect(cookieValue('vite-ui-theme')).toBe('dark'))
     })
 
     it('resets direction via section control after choosing RTL', async () => {
@@ -204,7 +218,7 @@ describe('ConfigDrawer (integration)', () => {
       await vi.waitFor(() =>
         expect(document.documentElement.getAttribute('dir')).toBe('ltr')
       )
-      expect(getCookie('dir')).toBe('ltr')
+      expect(cookieValue('dir')).toBe('ltr')
     })
 
     it('resets sidebar style via section control after choosing floating', async () => {
@@ -215,7 +229,7 @@ describe('ConfigDrawer (integration)', () => {
         screen.getByRole('radio', { name: /select floating/i })
       )
       await vi.waitFor(() =>
-        expect(getCookie('layout_variant')).toBe('floating')
+        expect(cookieValue('layout_variant')).toBe('floating')
       )
 
       await userEvent.click(
@@ -223,7 +237,7 @@ describe('ConfigDrawer (integration)', () => {
           name: /reset sidebar style to default/i,
         })
       )
-      await vi.waitFor(() => expect(getCookie('layout_variant')).toBe('inset'))
+      await vi.waitFor(() => expect(cookieValue('layout_variant')).toBe('inset'))
     })
 
     it('resets layout via section control after choosing compact', async () => {
@@ -233,16 +247,16 @@ describe('ConfigDrawer (integration)', () => {
       await userEvent.click(
         screen.getByRole('radio', { name: /select compact/i })
       )
-      await vi.waitFor(() => expect(getCookie('sidebar_state')).toBe('false'))
+      await vi.waitFor(() => expect(cookieValue('sidebar_state')).toBe('false'))
 
       await userEvent.click(
         screen.getByRole('button', {
           name: /reset layout options to default/i,
         })
       )
-      await vi.waitFor(() => expect(getCookie('sidebar_state')).toBe('true'))
+      await vi.waitFor(() => expect(cookieValue('sidebar_state')).toBe('true'))
       await vi.waitFor(() =>
-        expect(getCookie('layout_collapsible')).toBe('icon')
+        expect(cookieValue('layout_collapsible')).toBe('icon')
       )
     })
   })
@@ -258,7 +272,7 @@ describe('ConfigDrawer (integration)', () => {
     await vi.waitFor(() =>
       expect(document.documentElement.getAttribute('dir')).toBe('rtl')
     )
-    expect(getCookie('dir')).toBe('rtl')
+    expect(cookieValue('dir')).toBe('rtl')
   })
 
   it('updates layout: selecting non-default closes sidebar and changes layout cookie', async () => {
@@ -274,8 +288,8 @@ describe('ConfigDrawer (integration)', () => {
       screen.getByRole('radio', { name: /select compact/i })
     )
 
-    await vi.waitFor(() => expect(getCookie('sidebar_state')).toBe('false'))
-    await vi.waitFor(() => expect(getCookie('layout_collapsible')).toBe('icon'))
+    await vi.waitFor(() => expect(cookieValue('sidebar_state')).toBe('false'))
+    await vi.waitFor(() => expect(cookieValue('layout_collapsible')).toBe('icon'))
   })
 
   it('reset restores defaults across sidebar/theme/layout/direction', async () => {
@@ -283,7 +297,7 @@ describe('ConfigDrawer (integration)', () => {
 
     await openDrawer(screen)
 
-    await userEvent.click(screen.getByRole('radio', { name: /select dark/i }))
+    await userEvent.click(screen.getByRole('radio', { name: /select light/i }))
     await userEvent.click(
       screen.getByRole('radio', { name: /select right to left/i })
     )
@@ -294,11 +308,11 @@ describe('ConfigDrawer (integration)', () => {
       screen.getByRole('radio', { name: /select full layout/i })
     )
 
-    await vi.waitFor(() => expect(getCookie('vite-ui-theme')).toBe('dark'))
-    await vi.waitFor(() => expect(getCookie('dir')).toBe('rtl'))
-    await vi.waitFor(() => expect(getCookie('layout_variant')).toBe('floating'))
+    await vi.waitFor(() => expect(cookieValue('vite-ui-theme')).toBe('light'))
+    await vi.waitFor(() => expect(cookieValue('dir')).toBe('rtl'))
+    await vi.waitFor(() => expect(cookieValue('layout_variant')).toBe('floating'))
     await vi.waitFor(() =>
-      expect(getCookie('layout_collapsible')).toBe('offcanvas')
+      expect(cookieValue('layout_collapsible')).toBe('offcanvas')
     )
 
     await userEvent.click(
@@ -307,11 +321,11 @@ describe('ConfigDrawer (integration)', () => {
       })
     )
 
-    await vi.waitFor(() => expect(getCookie('sidebar_state')).toBe('true'))
-    await vi.waitFor(() => expect(getCookie('dir')).toBeUndefined())
-    await vi.waitFor(() => expect(getCookie('vite-ui-theme')).toBeUndefined())
-    await vi.waitFor(() => expect(getCookie('layout_variant')).toBe('inset'))
-    await vi.waitFor(() => expect(getCookie('layout_collapsible')).toBe('icon'))
+    await vi.waitFor(() => expect(cookieValue('sidebar_state')).toBe('true'))
+    await vi.waitFor(() => expect(cookieValue('dir')).toBeUndefined())
+    await vi.waitFor(() => expect(cookieValue('vite-ui-theme')).toBeUndefined())
+    await vi.waitFor(() => expect(cookieValue('layout_variant')).toBe('inset'))
+    await vi.waitFor(() => expect(cookieValue('layout_collapsible')).toBe('icon'))
     await vi.waitFor(() =>
       expect(document.documentElement.getAttribute('dir')).toBe('ltr')
     )

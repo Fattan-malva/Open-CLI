@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RotateCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { BrowserSnapshot } from '@/components/browser-snapshot'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
 import { Button } from '@/components/ui/button'
@@ -31,6 +32,7 @@ export function SocialWorkspace({ site }: SocialWorkspaceProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const createdLabels = useRef(new Set<string>())
   const pendingLabels = useRef(new Set<string>())
+  const lastSyncKey = useRef<string | null>(null)
   const [version, setVersion] = useState(0)
   const visible = Boolean(config)
   const label = config ? `browser-tab-social-${site}` : ''
@@ -60,7 +62,11 @@ export function SocialWorkspace({ site }: SocialWorkspaceProps) {
     if (labels.length === 0) return
     const active =
       config && label && visible && !isWebviewOverlayOpen() ? label : null
-    void syncBrowserTabs(labels, active, getBounds()).catch(() => undefined)
+    const bounds = getBounds()
+    const key = `${labels.join(',')}|${active ?? ''}|${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
+    if (lastSyncKey.current === key) return
+    lastSyncKey.current = key
+    void syncBrowserTabs(labels, active, bounds).catch(() => undefined)
   }, [visible, label, config, getBounds])
 
   useEffect(() => {
@@ -138,6 +144,8 @@ export function SocialWorkspace({ site }: SocialWorkspaceProps) {
   useEffect(() => {
     const reset = () => {
       createdLabels.current.clear()
+      pendingLabels.current.clear()
+      lastSyncKey.current = null
       setVersion((value) => value + 1)
     }
     window.addEventListener(BROWSER_DATA_CLEARED_EVENT, reset)
@@ -218,6 +226,7 @@ export function SocialWorkspace({ site }: SocialWorkspaceProps) {
               visible ? 'bg-background' : 'bg-transparent'
             )}
           >
+            <BrowserSnapshot key={label} label={label} />
             {!isDesktop && visible ? (
               <div className='flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground'>
                 Halaman social hanya tersedia pada aplikasi desktop.

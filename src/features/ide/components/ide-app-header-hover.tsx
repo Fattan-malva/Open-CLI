@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
+import { startWindowDrag } from '@/components/layout/window-controls'
 
 export function IdeAppHeaderHover() {
   const [revealed, setRevealed] = useState(false)
@@ -27,7 +28,12 @@ export function IdeAppHeaderHover() {
       <div
         onPointerEnter={show}
         onPointerLeave={hide}
-        className='fixed inset-x-0 top-0 z-[80] h-2'
+        onMouseDown={(event) => {
+          if (event.button !== 0) return
+          show()
+          startWindowDrag()
+        }}
+        className='fixed inset-x-0 top-0 z-[80] h-2 cursor-default'
         aria-hidden='true'
       />
       <div

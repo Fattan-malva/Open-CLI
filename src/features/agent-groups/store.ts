@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { onPtyData, onPtyExit, ptyKill, ptyWrite } from '@/lib/pty'
+import { loadAgentCliStore } from '@/lib/agent-cli-store'
 import { isDesktop } from '@/lib/platform'
 import {
   type AgentCapacity,
@@ -78,6 +79,13 @@ let flushFrame: number | null = null
 
 export function cleanOutputChunk(chunk: string): string {
   return chunk.replace(ANSI_PATTERN, '').replace(/\r(?!\n)/g, '')
+}
+
+function compactError(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error))
+    .replace(/\s+/g, ' ')
+    .trim()
+  return message.length > 180 ? `${message.slice(0, 177)}...` : message
 }
 
 function flushOutput(set: (fn: (state: AgentState) => Partial<AgentState>) => void) {
@@ -217,7 +225,8 @@ export const useAgentGroupStore = create<AgentState>((set, get) => {
       }))
 
       try {
-        await spawnAgentSession(id, detected.id)
+        const { projectPath } = await loadAgentCliStore()
+        await spawnAgentSession(id, detected.id, projectPath)
         return id
       } catch (error) {
         stopListening(id)
@@ -226,7 +235,7 @@ export const useAgentGroupStore = create<AgentState>((set, get) => {
           delete agents[id]
           return { agents }
         })
-        toast.error(`Gagal menjalankan ${detected.label}: ${String(error)}`)
+        toast.error(`Gagal menjalankan ${detected.label}: ${compactError(error)}`)
         return null
       }
     },

@@ -1,11 +1,94 @@
-import { memo, useEffect, useRef, useState } from 'react'
-import { Plus, RefreshCw, Send, Square } from 'lucide-react'
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
+import { Globe, Plus, RefreshCw, Send, Square, Workflow, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { BrowserWorkspace } from '@/features/browser'
+import { hideAllBrowserViews } from '@/lib/browser'
 import { cn } from '@/lib/utils'
 import { type Agent, useAgentGroupStore } from './store'
+import { OrchestratorPanel } from './orchestrator-panel'
 
 const PREVIEW_LINES = 40
+const LAYOUT_KEY = 'opencli.agent-groups.layout.v1'
+
+type Mode = 'agents' | 'orchestrator'
+
+type StoredLayout = {
+  sidebarWidth: number
+  rightWidth: number
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function loadLayout(): StoredLayout {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY)
+    if (!raw) return { sidebarWidth: 256, rightWidth: 460 }
+    const parsed = JSON.parse(raw) as Partial<StoredLayout>
+    return {
+      sidebarWidth: clamp(Number(parsed.sidebarWidth) || 256, 200, 420),
+      rightWidth: clamp(Number(parsed.rightWidth) || 460, 320, 920),
+    }
+  } catch {
+    return { sidebarWidth: 256, rightWidth: 460 }
+  }
+}
+
+function ResizeHandle({
+  label,
+  onResize,
+}: {
+  label: string
+  onResize: (delta: number) => void
+}) {
+  const startX = useRef<number | null>(null)
+
+  const stop = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (startX.current === null) return
+    startX.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  return (
+    <div
+      role='separator'
+      aria-label={label}
+      aria-orientation='vertical'
+      tabIndex={0}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        startX.current = event.clientX
+        event.currentTarget.setPointerCapture(event.pointerId)
+      }}
+      onPointerMove={(event) => {
+        if (startX.current === null) return
+        const delta = event.clientX - startX.current
+        if (!delta) return
+        startX.current = event.clientX
+        onResize(delta)
+      }}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onKeyDown={(event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+        event.preventDefault()
+        onResize(event.key === 'ArrowLeft' ? -16 : 16)
+      }}
+      className='w-1 shrink-0 cursor-col-resize bg-border outline-none transition-colors hover:bg-ring focus-visible:bg-ring'
+    />
+  )
+}
 
 function tailLines(text: string): string {
   const lines = text.split('\n')
@@ -96,10 +179,30 @@ export function AgentGroupWorkspace() {
 
   const [newGroupName, setNewGroupName] = useState('')
   const [draft, setDraft] = useState('')
+  const [mode, setMode] = useState<Mode>('agents')
+  const [browserOpen, setBrowserOpen] = useState(false)
+  const [layout] = useState(loadLayout)
+  const [sidebarWidth, setSidebarWidth] = useState(layout.sidebarWidth)
+  const [rightWidth, setRightWidth] = useState(layout.rightWidth)
 
   useEffect(() => {
     void loadEnvironment()
   }, [loadEnvironment])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        LAYOUT_KEY,
+        JSON.stringify({ sidebarWidth, rightWidth })
+      )
+    } catch {
+      return
+    }
+  }, [sidebarWidth, rightWidth])
+
+  useEffect(() => {
+    if (!browserOpen) void hideAllBrowserViews().catch(() => undefined)
+  }, [browserOpen])
 
   const allAgents = Object.values(agents)
   const running = allAgents.filter((agent) => agent.status === 'running')
@@ -125,14 +228,45 @@ export function AgentGroupWorkspace() {
           {running.length} / {max} agent aktif
           {capacity ? ` · ${capacity.cpus} core · ${Math.round(capacity.memoryMb / 1024)} GB` : ''}
         </span>
-        <Button variant='outline' size='sm' className='ml-auto gap-2' onClick={() => void loadEnvironment()}>
+        <div className='ml-auto flex items-center gap-1 rounded-md border p-0.5'>
+          <Button
+            variant={mode === 'agents' ? 'secondary' : 'ghost'}
+            size='sm'
+            className='h-7 px-2 text-xs'
+            onClick={() => setMode('agents')}
+          >
+            Agent
+          </Button>
+          <Button
+            variant={mode === 'orchestrator' ? 'secondary' : 'ghost'}
+            size='sm'
+            className='h-7 gap-1 px-2 text-xs'
+            onClick={() => setMode('orchestrator')}
+          >
+            <Workflow className='size-3.5' />
+            Orchestrator
+          </Button>
+        </div>
+        <Button
+          variant={browserOpen ? 'secondary' : 'outline'}
+          size='sm'
+          className='h-8 gap-1 px-2 text-xs'
+          onClick={() => setBrowserOpen((open) => !open)}
+        >
+          <Globe className='size-3.5' />
+          Browser
+        </Button>
+        <Button variant='outline' size='sm' className='gap-2' onClick={() => void loadEnvironment()}>
           <RefreshCw className='size-4' />
           Deteksi ulang
         </Button>
       </header>
 
       <div className='flex min-h-0 flex-1'>
-        <aside className='flex w-64 shrink-0 flex-col gap-3 overflow-y-auto border-r p-3'>
+        <aside
+          style={{ width: sidebarWidth }}
+          className='flex min-w-0 shrink-0 flex-col gap-3 overflow-y-auto p-3'
+        >
           <div className='flex gap-2'>
             <Input
               value={newGroupName}
@@ -211,8 +345,17 @@ export function AgentGroupWorkspace() {
           )}
         </aside>
 
+        <ResizeHandle
+          label='Ubah lebar daftar grup'
+          onResize={(delta) =>
+            setSidebarWidth((width) => clamp(width + delta, 200, 420))
+          }
+        />
+
         <main className='flex min-w-0 flex-1 flex-col'>
-          {!group ? (
+          {mode === 'orchestrator' ? (
+            <OrchestratorPanel />
+          ) : !group ? (
             <div className='flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground'>
               Pilih grup di kiri atau buat grup baru.
             </div>
@@ -315,6 +458,39 @@ export function AgentGroupWorkspace() {
             </>
           )}
         </main>
+
+        {browserOpen && (
+          <>
+            <ResizeHandle
+              label='Ubah lebar panel kanan'
+              onResize={(delta) =>
+                setRightWidth((width) => clamp(width - delta, 320, 920))
+              }
+            />
+            <section
+              style={{ width: rightWidth }}
+              className='flex min-w-0 shrink-0 flex-col border-l bg-background'
+            >
+              <div className='flex h-9 shrink-0 items-center justify-between border-b px-3'>
+                <span className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                  Browser
+                </span>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='size-6'
+                  aria-label='Tutup panel'
+                  onClick={() => setBrowserOpen(false)}
+                >
+                  <X className='size-3.5' />
+                </Button>
+              </div>
+              <div className='relative min-h-0 flex-1 overflow-hidden'>
+                <BrowserWorkspace visible embedded />
+              </div>
+            </section>
+          </>
+        )}
       </div>
     </div>
   )

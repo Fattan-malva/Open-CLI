@@ -1,7 +1,17 @@
 import { invoke } from '@tauri-apps/api/core'
 import { isDesktop } from './platform'
+import { isWebviewOverlayOpen, WEBVIEW_OVERLAY_EVENT } from './webview-overlay'
 
 export const BROWSER_DATA_CLEARED_EVENT = 'opencli:browser-data-cleared'
+export const BROWSER_SNAPSHOT_EVENT = 'opencli:browser-snapshot'
+
+export type BrowserSnapshotPayload = { label: string; dataUrl: string | null }
+
+const browserSnapshots = new Map<string, string>()
+
+export function getBrowserSnapshot(label: string) {
+  return browserSnapshots.get(label) ?? null
+}
 
 let browserCommandTail: Promise<unknown> = Promise.resolve()
 
@@ -24,31 +34,89 @@ type BrowserView = BrowserBounds & { label: string; visible: boolean }
 // (for example the two Brainstorming panes) while each owner only changes its own tabs.
 const browserViews = new Map<string, BrowserView>()
 
-// Only one native webview is shown at a time. If several views are marked visible,
-// the focused one wins; otherwise the first one stays and the rest are hidden.
-function applyBrowserViews(focus: string | null = null): Promise<void> {
-  const visible = Array.from(browserViews.values()).filter((view) => view.visible)
-  if (visible.length > 1) {
-    const keep = visible.find((view) => view.label === focus) ?? visible[0]
-    for (const view of visible) {
-      if (view !== keep) browserViews.set(view.label, { ...view, visible: false })
-    }
-  }
-  return enqueueBrowserCommand(() =>
-    invoke('browser_tabs_apply', {
+// Incremented whenever a route change hides every webview. A sync queued before
+// that change must not bring an old webview back after the hide command runs.
+let visibilityEpoch = 0
+
+function applyBrowserViews(focus: string | null = null, epoch?: number): Promise<void> {
+  return enqueueBrowserCommand(() => {
+    if (epoch !== undefined && epoch !== visibilityEpoch) return Promise.resolve()
+    return invoke('browser_tabs_apply', {
       views: Array.from(browserViews.values()),
       focus,
     })
-  )
+  })
 }
 
 /** Hides every native webview. Owners show their own view again when they become active. */
 export function hideAllBrowserViews(): Promise<void> {
+  const epoch = ++visibilityEpoch
   if (!isDesktop || browserViews.size === 0) return Promise.resolve()
   for (const [label, view] of browserViews) {
     if (view.visible) browserViews.set(label, { ...view, visible: false })
   }
-  return applyBrowserViews(null)
+  return applyBrowserViews(null, epoch)
+}
+
+function publishSnapshot(label: string, dataUrl: string | null) {
+  if (dataUrl) browserSnapshots.set(label, dataUrl)
+  else browserSnapshots.delete(label)
+  window.dispatchEvent(
+    new CustomEvent<BrowserSnapshotPayload>(BROWSER_SNAPSHOT_EVENT, {
+      detail: { label, dataUrl },
+    })
+  )
+}
+
+let overlaySession = 0
+
+async function captureOverlaySnapshots(session: number) {
+  const visible = Array.from(browserViews.values()).filter(
+    (view) => view.visible && !browserSnapshots.has(view.label)
+  )
+  await Promise.all(
+    visible.map(async (view) => {
+      try {
+        const dataUrl = await enqueueBrowserCommand(() =>
+          invoke<string>('browser_tab_snapshot', { label: view.label })
+        )
+        if (session === overlaySession && isWebviewOverlayOpen()) {
+          publishSnapshot(view.label, dataUrl)
+        }
+      } catch {
+        if (session === overlaySession && isWebviewOverlayOpen()) {
+          publishSnapshot(view.label, null)
+        }
+      }
+    })
+  )
+}
+
+let overlaySnapshotActive = false
+
+function onWebviewOverlayChange() {
+  const open = isWebviewOverlayOpen()
+  if (open === overlaySnapshotActive) return
+  overlaySnapshotActive = open
+  overlaySession += 1
+
+  if (!open) {
+    for (const label of Array.from(browserSnapshots.keys())) {
+      publishSnapshot(label, null)
+    }
+    return
+  }
+
+  const session = overlaySession
+  void captureOverlaySnapshots(session).finally(() => {
+    if (session === overlaySession && isWebviewOverlayOpen()) {
+      void hideAllBrowserViews().catch(() => undefined)
+    }
+  })
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(WEBVIEW_OVERLAY_EVENT, onWebviewOverlayChange)
 }
 
 // Hidden pages that were busy earlier (playing media, in a call) may become idle later,
@@ -59,7 +127,13 @@ let powerReviewTimer: number | null = null
 function ensurePowerReview() {
   if (powerReviewTimer !== null) return
   powerReviewTimer = window.setInterval(() => {
-    if (browserViews.size > 0) void applyBrowserViews().catch(() => undefined)
+    if (browserViews.size === 0) {
+      const timer = powerReviewTimer
+      powerReviewTimer = null
+      if (timer !== null) window.clearInterval(timer)
+      return
+    }
+    void applyBrowserViews().catch(() => undefined)
   }, POWER_REVIEW_MS)
 }
 
@@ -136,6 +210,7 @@ export function syncBrowserTabs(
   bounds: BrowserBounds
 ): Promise<void> {
   if (!isDesktop) return Promise.resolve()
+  const epoch = visibilityEpoch
   for (const label of labels) {
     const current = browserViews.get(label)
     if (!current) continue
@@ -149,7 +224,7 @@ export function syncBrowserTabs(
       height: rect.height,
     })
   }
-  return applyBrowserViews(active)
+  return applyBrowserViews(active, epoch)
 }
 
 export function repaintBrowserTab(
@@ -167,10 +242,18 @@ export function repaintBrowserTab(
 export function closeBrowserTab(label: string): Promise<void> {
   if (!isDesktop) return Promise.resolve()
   browserViews.delete(label)
+  publishSnapshot(label, null)
   return enqueueBrowserCommand(() => invoke('browser_tab_close', { label }))
 }
 
 export function notifyBrowserDataCleared() {
   browserViews.clear()
+  if (powerReviewTimer !== null) {
+    window.clearInterval(powerReviewTimer)
+    powerReviewTimer = null
+  }
+  for (const label of Array.from(browserSnapshots.keys())) {
+    publishSnapshot(label, null)
+  }
   window.dispatchEvent(new Event(BROWSER_DATA_CLEARED_EVENT))
 }

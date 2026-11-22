@@ -11,6 +11,10 @@ export function getAgentCapacity(): Promise<AgentCapacity> {
   return invoke<AgentCapacity>('agent_capacity')
 }
 
-export function spawnAgentSession(id: string, command: string): Promise<void> {
-  return invoke<void>('agent_spawn', { id, command, cwd: null })
+export function spawnAgentSession(
+  id: string,
+  agent: string,
+  cwd: string | null
+): Promise<void> {
+  return invoke<void>('agent_spawn', { id, agent, cwd })
 }

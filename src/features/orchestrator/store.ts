@@ -18,10 +18,8 @@ import { applyEvent, EventHub } from './events'
 import { isTerminalTaskState } from './state-machines'
 import {
   AgentSession,
-  BrowserContext,
   type AttachmentValue,
   type BrowserContextValue,
-  type BrowserElementContextValue,
   type OrchestratorEventValue,
   type SnapshotValue,
   type TaskValue,
@@ -49,8 +47,6 @@ type OrchestratorState = {
   busy: boolean
   error: string | null
   grants: api.BridgeGrant[]
-  inspecting: boolean
-  inspectTabLabel: string | null
   eventHub: EventHub
   engine: EngineContext
   hydrated: boolean
@@ -78,10 +74,11 @@ type OrchestratorState = {
   integrate: (taskId: string) => Promise<void>
   setBrowserContext: (context: BrowserContextValue) => void
   clearBrowserContext: () => void
-  setInspecting: (tabLabel: string | null, enabled: boolean) => void
-  handleElement: (payload: Record<string, unknown>) => Promise<void>
   shareBrowser: (tabLabel: string, agentId: string) => Promise<void>
   revokeBrowser: (token: string) => Promise<void>
+  forgetGrant: (token: string) => void
+  forgetTabGrants: (tabLabel: string) => void
+  pruneGrants: () => void
   clearError: () => void
 }
 
@@ -130,7 +127,6 @@ function timestamp(): string {
 }
 
 let unlistenEvents: (() => void) | null = null
-let unlistenElements: (() => void) | null = null
 let hydratePromise: Promise<void> | null = null
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 let refreshPending = false
@@ -147,8 +143,6 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   busy: false,
   error: null,
   grants: [],
-  inspecting: false,
-  inspectTabLabel: null,
   eventHub: new EventHub(),
   engine: defaultEngineContext,
   hydrated: false,
@@ -173,9 +167,6 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
             refreshTimer = null
             void get().refreshAgents()
           }, 120)
-        })
-        unlistenElements = await api.onBrowserElement((payload) => {
-          void get().handleElement(payload)
         })
       } catch (error) {
         set({
@@ -517,40 +508,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   setBrowserContext: (context) => set({ context }),
 
-  clearBrowserContext: () => set({ context: EMPTY_CONTEXT, inspecting: false, inspectTabLabel: null }),
-
-  setInspecting: (tabLabel, enabled) => set({ inspecting: enabled, inspectTabLabel: enabled ? tabLabel : null }),
-
-  handleElement: async (payload) => {
-    const parsed = BrowserContext.shape.element.safeParse(payload)
-    if (!parsed.success || !parsed.data) return
-    const element: BrowserElementContextValue = parsed.data
-    set((state) => ({
-      context: {
-        ...state.context,
-        element,
-        page: state.context.page
-          ? { ...state.context.page, url: element.pageUrl, title: element.pageTitle, capturedAt: element.capturedAt }
-          : {
-              url: element.pageUrl,
-              title: element.pageTitle,
-              selectedText: element.visibleText,
-              capturedAt: element.capturedAt,
-            },
-      },
-      inspecting: false,
-      inspectTabLabel: null,
-      messages: [
-        ...state.messages,
-        {
-          id: newId('msg'),
-          role: 'orchestrator',
-          text: `Attached element <${element.tag}> from ${element.pageUrl} to this chat context.`,
-          timestamp: timestamp(),
-        },
-      ],
-    }))
-  },
+  clearBrowserContext: () => set({ context: EMPTY_CONTEXT }),
 
   shareBrowser: async (tabLabel, agentId) => {
     try {
@@ -569,14 +527,30 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     set((state) => ({ grants: state.grants.filter((item) => item.token !== token) }))
   },
 
+  forgetGrant: (token) => {
+    set((state) => ({ grants: state.grants.filter((item) => item.token !== token) }))
+  },
+
+  forgetTabGrants: (tabLabel) => {
+    set((state) => ({
+      grants: state.grants.filter((item) => item.tabLabel !== tabLabel),
+    }))
+  },
+
+  pruneGrants: () => {
+    const now = Date.now()
+    set((state) => {
+      const grants = state.grants.filter((item) => item.expiresAt > now)
+      return grants.length === state.grants.length ? state : { grants }
+    })
+  },
+
   clearError: () => set({ error: null }),
 }))
 
 export function detachOrchestratorListeners(): void {
   unlistenEvents?.()
-  unlistenElements?.()
   unlistenEvents = null
-  unlistenElements = null
   hydratePromise = null
   refreshPending = false
   if (refreshTimer !== null) clearTimeout(refreshTimer)

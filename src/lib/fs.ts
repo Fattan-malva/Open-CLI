@@ -82,6 +82,30 @@ export async function writeIdeTextFile(
   await invoke<void>('ide_fs_write_text', { path, contents })
 }
 
+export async function createIdeEntry(
+  root: string,
+  parent: string,
+  name: string,
+  kind: 'file' | 'folder'
+): Promise<string> {
+  if (!isDesktop) return ''
+  return await invoke<string>('ide_fs_create', { root, parent, name, kind })
+}
+
+export async function renameIdeEntry(
+  root: string,
+  path: string,
+  name: string
+): Promise<string> {
+  if (!isDesktop) return ''
+  return await invoke<string>('ide_fs_rename', { root, path, name })
+}
+
+export async function deleteIdeEntry(root: string, path: string): Promise<void> {
+  if (!isDesktop) return
+  await invoke<void>('ide_fs_delete', { root, path })
+}
+
 export async function searchIdeText(
   root: string,
   query: string,

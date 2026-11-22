@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// One long-lived `System` is reused for every sample, so each refresh only
@@ -145,8 +145,15 @@ pub async fn system_memory_snapshot() -> Result<SystemMemorySnapshot, String> {
             })
             .collect();
 
-        processes.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes).then_with(|| a.pid.cmp(&b.pid)));
-        let opencli_bytes = processes.iter().map(|process| process.memory_bytes).sum::<u64>();
+        processes.sort_by(|a, b| {
+            b.memory_bytes
+                .cmp(&a.memory_bytes)
+                .then_with(|| a.pid.cmp(&b.pid))
+        });
+        let opencli_bytes = processes
+            .iter()
+            .map(|process| process.memory_bytes)
+            .sum::<u64>();
         processes.truncate(10);
 
         Ok(SystemMemorySnapshot {

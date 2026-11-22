@@ -7,6 +7,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Webview};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct BridgeGrant {
@@ -20,7 +21,6 @@ pub struct BridgeGrant {
 pub struct BrowserBridgeState {
     pub grants: Arc<Mutex<HashMap<String, BridgeGrant>>>,
     pub stops: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
-    pub inspects: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 impl Default for BrowserBridgeState {
@@ -28,7 +28,6 @@ impl Default for BrowserBridgeState {
         Self {
             grants: Arc::new(Mutex::new(HashMap::new())),
             stops: Arc::new(Mutex::new(HashMap::new())),
-            inspects: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -41,11 +40,49 @@ fn now_ms() -> i64 {
 }
 
 fn random_token() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    format!("{:x}{:x}", nanos, std::process::id())
+    Uuid::new_v4().simple().to_string()
+}
+
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (a, b) in left.iter().zip(right) {
+        difference |= a ^ b;
+    }
+    difference == 0
+}
+
+fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {
+    request
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            if key.trim().eq_ignore_ascii_case(name) {
+                Some(value.trim())
+            } else {
+                None
+            }
+        })
+}
+
+fn is_authorized(request: &str, token: &str) -> bool {
+    if let Some(value) = header_value(request, "authorization") {
+        let mut parts = value.splitn(2, ' ');
+        if let (Some(scheme), Some(secret)) = (parts.next(), parts.next()) {
+            if scheme.eq_ignore_ascii_case("bearer") && constant_time_eq(secret.trim(), token) {
+                return true;
+            }
+        }
+    }
+    header_value(request, "x-opencli-token")
+        .map(|value| constant_time_eq(value.trim(), token))
+        .unwrap_or(false)
 }
 
 fn js_string(value: &str) -> String {
@@ -156,16 +193,6 @@ fn wait_op(app: &AppHandle, tab_label: &str, args: &Value) -> Result<Value, Stri
     }
 }
 
-fn inspect_state_op(app: &AppHandle, tab_label: &str) -> Result<Value, String> {
-    let webview = app
-        .get_webview(tab_label)
-        .ok_or_else(|| format!("browser tab {} not found", tab_label))?;
-    eval_json(
-        &webview,
-        "(() => window.__opencliInspect ? (window.__opencliInspect.take() || null) : null)()",
-    )
-}
-
 pub fn call(
     app: &AppHandle,
     state: &BrowserBridgeState,
@@ -204,7 +231,6 @@ pub fn call(
         "type" => type_op(app, tab_label, args)?,
         "scroll" => scroll_op(app, tab_label, args)?,
         "waitFor" => wait_op(app, tab_label, args)?,
-        "inspectState" => inspect_state_op(app, tab_label)?,
         "snapshot" => {
             let webview = app
                 .get_webview(tab_label)
@@ -232,6 +258,9 @@ pub fn start(
         .local_addr()
         .map_err(|error| error.to_string())?
         .port();
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
     let grant = BridgeGrant {
         token: token.clone(),
         tab_label: tab_label.to_string(),
@@ -240,6 +269,7 @@ pub fn start(
         port,
     };
     let stop = Arc::new(AtomicBool::new(false));
+    let expires_at = grant.expires_at;
     state
         .grants
         .lock()
@@ -255,16 +285,11 @@ pub fn start(
     let bridge_state = BrowserBridgeState {
         grants: state.grants.clone(),
         stops: state.stops.clone(),
-        inspects: state.inspects.clone(),
     };
     let server_token = token.clone();
     let server_label = tab_label.to_string();
     std::thread::spawn(move || {
-        listener
-            .set_nonblocking(true)
-            .map_err(|error| error.to_string())
-            .ok();
-        while !stop.load(Ordering::Relaxed) {
+        while !stop.load(Ordering::Relaxed) && now_ms() < expires_at {
             match listener.accept() {
                 Ok((mut stream, _)) => {
                     let mut buffer = [0u8; 65536];
@@ -277,9 +302,15 @@ pub fn start(
                         &server_token,
                         &request,
                     );
-                    let reason = if status == 200 { "OK" } else { "Forbidden" };
+                    let reason = match status {
+                        200 => "OK",
+                        400 => "Bad Request",
+                        401 => "Unauthorized",
+                        404 => "Not Found",
+                        _ => "Forbidden",
+                    };
                     let response = format!(
-                        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{}",
+                        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{}",
                         status,
                         reason,
                         body.len(),
@@ -293,6 +324,12 @@ pub fn start(
                 }
                 Err(_) => break,
             }
+        }
+        if let Ok(mut grants) = bridge_state.grants.lock() {
+            grants.remove(&server_token);
+        }
+        if let Ok(mut stops) = bridge_state.stops.lock() {
+            stops.remove(&server_token);
         }
     });
     Ok(grant)
@@ -309,6 +346,12 @@ fn handle_request(
     let parts: Vec<&str> = first_line.split_whitespace().collect();
     let method = parts.first().copied().unwrap_or("");
     let path = parts.get(1).copied().unwrap_or("");
+    if !is_authorized(request, token) {
+        return (
+            401,
+            json!({ "ok": false, "error": "unauthorized" }).to_string(),
+        );
+    }
     let body_start = request.find("\r\n\r\n").map(|index| index + 4).unwrap_or(0);
     let body = if body_start <= request.len() {
         &request[body_start..]
@@ -323,7 +366,6 @@ fn handle_request(
             {"name":"browser.type","description":"Type text into an element","input":{"selector":"string","text":"string"}},
             {"name":"browser.scroll","description":"Scroll the page","input":{"x":"number","y":"number"}},
             {"name":"browser.waitFor","description":"Wait for a selector","input":{"selector":"string","timeoutMs":"number"}},
-            {"name":"browser.inspectState","description":"Take the last inspected element context","input":{}},
             {"name":"browser.snapshot","description":"Get page URL and title","input":{}}
         ]
     });
@@ -366,11 +408,6 @@ pub fn stop(state: &BrowserBridgeState, token: &str) -> Result<(), String> {
             flag.store(true, Ordering::Relaxed);
         }
     }
-    if let Ok(inspects) = state.inspects.lock() {
-        if let Some(flag) = inspects.get(token) {
-            flag.store(true, Ordering::Relaxed);
-        }
-    }
     let mut grants = state.grants.lock().map_err(|error| error.to_string())?;
     grants.remove(token);
     Ok(())
@@ -391,3 +428,25 @@ pub fn stop_for_tab(state: &BrowserBridgeState, tab_label: &str) -> Result<usize
     Ok(tokens.len())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{header_value, is_authorized};
+
+    #[test]
+    fn accepts_bearer_and_custom_header() {
+        let request =
+            "POST /call HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer secret123\r\n\r\n{}";
+        assert!(is_authorized(request, "secret123"));
+        assert!(!is_authorized(request, "wrong"));
+
+        let custom = "GET /tools HTTP/1.1\r\nX-OpenCLI-Token: secret123\r\n\r\n";
+        assert!(is_authorized(custom, "secret123"));
+    }
+
+    #[test]
+    fn does_not_read_headers_from_request_body() {
+        let request = "POST /call HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\nX-OpenCLI-Token: secret123";
+        assert!(header_value(request, "x-opencli-token").is_none());
+        assert!(!is_authorized(request, "secret123"));
+    }
+}

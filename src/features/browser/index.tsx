@@ -22,6 +22,8 @@ import {
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { BrowserSnapshot } from '@/components/browser-snapshot'
+import { BridgeControls } from '@/features/browser/bridge-controls'
 import { AuthenticatedHeader } from '@/components/layout/authenticated-header'
 import { Main } from '@/components/layout/main'
 import { Button } from '@/components/ui/button'
@@ -42,6 +44,7 @@ import {
   syncBrowserTabs,
   type BrowserBounds,
 } from '@/lib/browser'
+import { useOrchestratorStore } from '@/features/orchestrator/store'
 import { isDesktop } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import {
@@ -184,6 +187,7 @@ export function BrowserWorkspace({
   const viewportRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const pendingTitles = useRef(new Map<string, string>())
+  const lastSyncKey = useRef<string | null>(null)
   const latestRef = useRef({
     visible,
     activeLabel: null as string | null,
@@ -228,16 +232,15 @@ export function BrowserWorkspace({
     if (!isDesktop) return
 
     const latest = latestRef.current
-    if (
-      !latest.visible ||
-      !latest.activeLabel ||
-      isWebviewOverlayOpen()
-    ) {
-      await syncBrowserTabs(latest.labels, null, getBounds())
-      return
-    }
-
-    await syncBrowserTabs(latest.labels, latest.activeLabel, getBounds())
+    const bounds = getBounds()
+    const active =
+      latest.visible && latest.activeLabel && !isWebviewOverlayOpen()
+        ? latest.activeLabel
+        : null
+    const key = `${latest.labels.join(',')}|${active ?? ''}|${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
+    if (lastSyncKey.current === key) return
+    lastSyncKey.current = key
+    await syncBrowserTabs(latest.labels, active, bounds)
   }, [getBounds])
 
   const addTab = useCallback(
@@ -605,6 +608,7 @@ export function BrowserWorkspace({
       }
 
       pendingTitles.current.delete(tabs[index].label)
+      useOrchestratorStore.getState().forgetTabGrants(tabs[index].label)
       setTabs(next)
       if (activeId === id) setActiveId(fallback?.id ?? null)
     },
@@ -833,6 +837,7 @@ export function BrowserWorkspace({
   useEffect(() => {
     const reset = () => {
       pendingTitles.current.clear()
+      lastSyncKey.current = null
       setTabs([])
       setActiveId(null)
     }
@@ -1070,6 +1075,8 @@ export function BrowserWorkspace({
             >
               <RotateCw className='size-4' />
             </Button>
+
+            <BridgeControls tabLabel={activeLabel} />
           </div>
 
           {!embedded && (
@@ -1237,6 +1244,7 @@ export function BrowserWorkspace({
           )}
 
           <div ref={viewportRef} className='relative min-h-0 flex-1 bg-background'>
+            {activeLabel && <BrowserSnapshot key={activeLabel} label={activeLabel} />}
             {showNewTab && (
               <div className='flex h-full flex-col items-center justify-center gap-6 bg-background px-4 text-center text-foreground'>
                 <div className='space-y-1'>
@@ -1297,6 +1305,7 @@ export function BrowserWorkspace({
           return (
             <div
               data-bookmark-context-menu
+              role='menu'
               className='fixed z-[120] w-40 rounded-md border bg-popover p-1 text-popover-foreground shadow-lg'
               style={{
                 left: Math.max(8, Math.min(bookmarkContextMenu.x, window.innerWidth - 176)),

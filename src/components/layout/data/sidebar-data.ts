@@ -51,14 +51,14 @@ export const sidebarData: SidebarData = {
           icon: Code2,
         },
         {
-          title: 'Browser',
-          url: '/browser',
-          icon: Globe,
-        },
-        {
           title: 'Brainstorming',
           url: '/brainstorming',
           icon: Brain,
+        },
+        {
+          title: 'Browser',
+          url: '/browser',
+          icon: Globe,
         },
         {
           title: 'Dashboard',
@@ -81,7 +81,7 @@ export const sidebarData: SidebarData = {
           icon: Bot,
         },
         {
-          title: 'Orchestration',
+          title: 'Orchestrator',
           url: '/agent-chat',
           icon: MessageSquare,
         },

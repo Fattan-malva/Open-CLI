@@ -92,18 +92,41 @@ pub async fn agent_capacity() -> Result<AgentCapacity, String> {
     .map_err(|error| error.to_string())?
 }
 
+fn launch_command(path: &str) -> (String, Option<String>) {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".cmd") || lower.ends_with(".bat") {
+        ("cmd.exe".to_string(), Some(path.to_string()))
+    } else if lower.ends_with(".ps1") {
+        ("powershell.exe".to_string(), Some(path.to_string()))
+    } else {
+        (path.to_string(), None)
+    }
+}
+
 #[tauri::command(async)]
 pub async fn agent_spawn(
     app: AppHandle,
     pty: State<'_, PtyState>,
     id: String,
-    command: String,
+    agent: String,
     cwd: Option<String>,
 ) -> Result<(), String> {
+    if !KNOWN_AGENTS.iter().any(|(known, _)| *known == agent) {
+        return Err(format!("unknown agent: {agent}"));
+    }
     let state = pty.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        crate::ensure_pty_session_with_command(&app, &state, &id, None, cwd, Some(&command))
-            .map(|_| ())
+        let path = locate(&agent).ok_or_else(|| format!("{agent} tidak ditemukan di PATH"))?;
+        let (shell, command) = launch_command(&path);
+        crate::ensure_pty_session_with_command(
+            &app,
+            &state,
+            &id,
+            Some(shell),
+            cwd,
+            command.as_deref(),
+        )
+        .map(|_| ())
     })
     .await
     .map_err(|error| error.to_string())?

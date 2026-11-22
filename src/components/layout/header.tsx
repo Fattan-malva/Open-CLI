@@ -10,6 +10,13 @@ type HeaderProps = React.HTMLAttributes<HTMLElement> & {
   ref?: React.Ref<HTMLElement>
 }
 
+const INTERACTIVE_DRAG_TARGET =
+  'button, a, input, textarea, select, label, [role="button"], [data-no-window-drag]'
+
+function isInteractiveDragTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest(INTERACTIVE_DRAG_TARGET))
+}
+
 export function Header({ className, fixed, children, ...props }: HeaderProps) {
   const [offset, setOffset] = useState(0)
 
@@ -22,26 +29,23 @@ export function Header({ className, fixed, children, ...props }: HeaderProps) {
     return () => document.removeEventListener('scroll', onScroll)
   }, [])
 
+  const startDrag = (event: React.MouseEvent<HTMLElement>) => {
+    if (event.button !== 0 || isInteractiveDragTarget(event.target)) return
+    event.preventDefault()
+    startWindowDrag()
+  }
+
   return (
     <header
+      onMouseDown={startDrag}
       className={cn(
-        'relative z-50 h-16',
+        'relative z-50 h-16 select-none',
         fixed && 'header-fixed peer/header sticky top-0 w-[inherit]',
         offset > 10 && fixed ? 'shadow' : 'shadow-none',
         className
       )}
       {...props}
     >
-      {isDesktop && (
-        <div
-          className='absolute inset-0 z-0 cursor-default'
-          onMouseDown={(event) => {
-            if (event.button !== 0) return
-            event.preventDefault()
-            startWindowDrag()
-          }}
-        />
-      )}
       <div
         className={cn(
           'relative z-10 flex h-full items-center gap-3 p-4 sm:gap-4',

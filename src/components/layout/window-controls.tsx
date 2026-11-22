@@ -43,6 +43,8 @@ function WindowControl({
   )
 }
 
+let maximizedState = false
+
 export function WindowControls({ className }: { className?: string }) {
   const [maximized, setMaximized] = useState(false)
   const appWindow = useMemo(() => (isDesktop ? getCurrentWindow() : null), [])
@@ -55,6 +57,7 @@ export function WindowControls({ className }: { className?: string }) {
 
     const sync = async () => {
       const value = await appWindow.isMaximized()
+      maximizedState = value
       if (active) setMaximized(value)
     }
 
@@ -80,7 +83,11 @@ export function WindowControls({ className }: { className?: string }) {
   const toggleMaximize = () => {
     void appWindow
       .toggleMaximize()
-      .then(async () => setMaximized(await appWindow.isMaximized()))
+      .then(async () => {
+        const value = await appWindow.isMaximized()
+        maximizedState = value
+        setMaximized(value)
+      })
       .catch(() => undefined)
   }
 
@@ -119,7 +126,7 @@ export function WindowControls({ className }: { className?: string }) {
 }
 
 export function startWindowDrag() {
-  if (!isDesktop) return
+  if (!isDesktop || maximizedState) return
   void getCurrentWindow()
     .startDragging()
     .catch(() => undefined)

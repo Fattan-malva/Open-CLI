@@ -201,13 +201,3 @@ export function browserBridgeStart(tabLabel: string, agentId: string): Promise<B
 export function browserBridgeStop(token: string): Promise<void> {
   return call('orchestrator_browser_bridge_stop', { token }, undefined, undefined)
 }
-
-export async function onBrowserElement(
-  handler: Handler<Record<string, unknown>>
-): Promise<() => void> {
-  if (!isDesktop) return () => undefined
-  const unlisten = await listen<Record<string, unknown>>('orchestrator:browser-element', ({ payload }) =>
-    handler(payload)
-  )
-  return unlisten
-}

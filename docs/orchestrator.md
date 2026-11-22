@@ -1,20 +1,20 @@
 # OpenCLI Orchestrator
 
-Orchestrator is an additive mode for the existing Terminal workspace. Terminal Only remains the default and existing terminal/browser behavior is unchanged.
+The Orchestrator workspace has an Agent/Orchestrator mode switch on the left. Browser is a separate toggle that opens a resizable right-side panel without changing the left mode, and a full Browser page is available under Workspace. The group list width is also resizable and persisted. Terminal remains focused on terminals and native Agent CLI sessions.
 
 ## Enabling and use
 
 1. Open **Settings → Agent CLI** and enable at least one native Agent CLI.
 2. Set the project root in the Agent CLI settings.
-3. Launch the agent from the terminal launcher. Only terminals launched this way are tagged with `agentId` and eligible for orchestration.
-4. Switch from **Terminal** to **Orchestrator** in the terminal toolbar.
-5. Describe the work in the Orchestrator chat. A run is created in `draft`.
-6. Open the browser panel and use **Share with Agent** to grant a tab bridge token to the selected agent when browser access is needed.
-7. Use **Inspect Element** while shared; clicking an element attaches sanitized tag/text/attributes/selector context to the chat.
+3. Launch the agent from the Agent Group workspace or the terminal launcher. Only app-launched sessions are eligible for orchestration.
+4. Open **Agent AI → Orchestrator** to work with the grouped agents.
+5. Switch the left layout to **Orchestrator** and describe the work in the chat. A run is created in `draft`.
+6. Click **Browser** to open the resizable right panel. Select a running agent in the toolbar and use **Share with Agent** to grant a tab bridge token.
+7. Copy the token or the generated agent instructions, then let the agent call `GET /tools` and `POST /call` on the loopback bridge. Revoke access from the toolbar when done.
 8. In **Approve & run**, the coordinator CLI writes `plan.json` into the run artifact directory. The plan is schema- and DAG-validated, workspaces are prepared, and independent tasks are dispatched with bounded concurrency.
 9. Review task evidence, retry failed tasks, and integrate completed work through the controlled queue.
 
-Terminal sessions are never terminated or reset by mode switching.
+Terminal sessions are never terminated or reset when switching the workspace mode or toggling the browser panel.
 
 ## Supported agents
 
@@ -44,9 +44,9 @@ Persistence lives in the app data directory under `orchestrator/orchestrator.sql
 
 - A browser grant is explicit, per-tab, per-agent, tokenized, and expires after 30 minutes.
 - The loopback JSON-RPC bridge binds only to `127.0.0.1`.
-- Tools: navigate, read, click, type, scroll, waitFor, inspectState, snapshot.
-- Inspect Element stores selection in the page, uses a temporary outline (no layout change), and emits a bounded click-selection event. Screenshots are not required.
-- Grants can be revoked from the browser toolbar or Orchestrator dock.
+- Tools: navigate, read, click, type, scroll, waitFor, snapshot.
+- Every request must send `Authorization: Bearer <token>` or `X-OpenCLI-Token: <token>`; unauthorized requests return 401.
+- Grants are automatically removed when the tab closes or the 30-minute expiry passes, and can be revoked from the browser toolbar.
 
 ## Isolation and integration
 

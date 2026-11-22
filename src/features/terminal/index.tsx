@@ -4,13 +4,10 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
 } from 'react'
 import {
   Bot,
   FolderOpen,
-  Globe,
-  GripVertical,
   Plus,
   Terminal,
   Trash2,
@@ -39,12 +36,6 @@ import {
   SelectSeparator,
   SelectTrigger,
 } from '@/components/ui/select'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { isDesktop } from '@/lib/platform'
 import {
@@ -58,7 +49,6 @@ import {
 } from '@/lib/agent-cli-store'
 import { builtInAgents, type AgentCliItem } from '@/features/agent-cli/data/agents'
 import { ShortcutKeys } from '@/features/agent-cli/components/shortcut-keys'
-import { BrowserWorkspace } from '@/features/browser'
 import { ProjectPickerDialog } from './components/project-picker-dialog'
 import { TerminalPane } from './components/terminal-pane'
 import { useTerminalStore } from './store'
@@ -109,12 +99,6 @@ const terminalShortcuts = [
     icon: Plus,
   },
   {
-    keys: ['Ctrl', 'Shift', 'B'],
-    label: 'Buka / tutup browser',
-    description: 'Menampilkan panel browser di samping terminal.',
-    icon: Globe,
-  },
-  {
     keys: ['Ctrl', 'W'],
     label: 'Tutup satu',
     description: 'Menutup satu terminal dari bawah.',
@@ -130,8 +114,6 @@ const terminalShortcuts = [
 
 const GAP = 2
 const CLOSE_STEP_MS = 70
-const TERMINAL_BROWSER_SPLIT_KEY = 'opencli.terminal.browser.split.v1'
-const MIN_TERMINAL_ROW_HEIGHT = 180
 
 function isDialogOpen() {
   return Boolean(document.querySelector('[role="dialog"]'))
@@ -143,28 +125,6 @@ function shouldHandleShortcut(target: EventTarget | null) {
   const inTerminal = Boolean(target.closest('.xterm'))
   if (inTerminal) return true
   return !target.closest('input, textarea, [contenteditable="true"]')
-}
-
-function clampBrowserSplit(value: number) {
-  if (!Number.isFinite(value)) return 0.5
-  return Math.min(0.75, Math.max(0.25, value))
-}
-
-function readBrowserSplitRatio() {
-  try {
-    const raw = localStorage.getItem(TERMINAL_BROWSER_SPLIT_KEY)
-    return raw ? clampBrowserSplit(Number(raw)) : 0.5
-  } catch {
-    return 0.5
-  }
-}
-
-function writeBrowserSplitRatio(value: number) {
-  try {
-    localStorage.setItem(TERMINAL_BROWSER_SPLIT_KEY, String(value))
-  } catch {
-    return
-  }
 }
 
 function sleep(ms: number) {
@@ -282,37 +242,14 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     makeWeights('1:1:1', { cols: 1, rows: 1, lastCount: 1 })
   )
   const [drag, setDrag] = useState<Drag | null>(null)
-  const [browserOpen, setBrowserOpen] = useState(false)
-  const [browserSplit, setBrowserSplit] = useState(readBrowserSplitRatio)
-  const [browserDrag, setBrowserDrag] = useState<{
-    start: number
-    startRatio: number
-    size: number
-    axis: 'x' | 'y'
-  } | null>(null)
-  const [browserStacked, setBrowserStacked] = useState(
-    () =>
-      typeof window !== 'undefined' &&
-      window.matchMedia('(max-width: 900px)').matches
-  )
-  const [browserCompact, setBrowserCompact] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
-  const browserSplitRef = useRef<HTMLDivElement>(null)
-  const browserTerminalPaneRef = useRef<HTMLDivElement>(null)
   const animationTimer = useRef<number | null>(null)
   const closeShortcutInFlight = useRef(false)
   const pendingLaunchRef = useRef<LaunchAction | null>(null)
-  const browserAxis = browserStacked ? 'y' : 'x'
 
-  const terminalCompact = browserOpen ? browserCompact : compact
   const layout = useMemo(
-    () =>
-      layoutFor(
-        Math.max(1, tabs.length),
-        terminalCompact,
-        browserOpen ? 2 : 4
-      ),
-    [browserOpen, terminalCompact, tabs.length]
+    () => layoutFor(Math.max(1, tabs.length), compact, 4),
+    [compact, tabs.length]
   )
   const weightKey = `${layout.cols}:${layout.rows}:${layout.lastCount}`
   const colWeights =
@@ -345,65 +282,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     query.addEventListener('change', update)
     return () => query.removeEventListener('change', update)
   }, [])
-
-  useEffect(() => {
-    const query = window.matchMedia('(max-width: 900px)')
-    const update = () => setBrowserStacked(query.matches)
-    update()
-    query.addEventListener('change', update)
-    return () => query.removeEventListener('change', update)
-  }, [])
-
-  useEffect(() => {
-    if (!browserOpen) return
-
-    const element = browserTerminalPaneRef.current
-    if (!element) return
-
-    const update = (width: number) => setBrowserCompact(width < 560)
-    update(element.clientWidth)
-
-    const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width
-      if (typeof width === 'number') update(width)
-    })
-    observer.observe(element)
-
-    return () => observer.disconnect()
-  }, [browserOpen])
-
-  useEffect(() => {
-    if (!browserDrag) writeBrowserSplitRatio(browserSplit)
-  }, [browserSplit, browserDrag])
-
-  useEffect(() => {
-    if (!browserDrag) return
-
-    const previous = document.body.style.userSelect
-    document.body.style.userSelect = 'none'
-
-    const onMove = (event: PointerEvent) => {
-      const current = browserAxis === 'x' ? event.clientX : event.clientY
-      setBrowserSplit(
-        clampBrowserSplit(
-          browserDrag.startRatio +
-            (current - browserDrag.start) / browserDrag.size
-        )
-      )
-    }
-    const onUp = () => setBrowserDrag(null)
-
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
-
-    return () => {
-      document.body.style.userSelect = previous
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
-    }
-  }, [browserDrag, browserAxis])
 
   useEffect(() => () => {
     if (animationTimer.current !== null) window.clearTimeout(animationTimer.current)
@@ -666,17 +544,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
       }
       if (
         event.ctrlKey &&
-        event.shiftKey &&
-        !event.altKey &&
-        event.key.toLowerCase() === 'b'
-      ) {
-        event.preventDefault()
-        event.stopPropagation()
-        setBrowserOpen((open) => !open)
-        return
-      }
-      if (
-        event.ctrlKey &&
         !event.shiftKey &&
         !event.altKey &&
         event.key.toLowerCase() === 'w'
@@ -769,27 +636,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
     })
   }
 
-  const startBrowserDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    const container = browserSplitRef.current
-    if (!container) return
-    event.preventDefault()
-
-    const rect = container.getBoundingClientRect()
-    const size = browserAxis === 'x' ? rect.width : rect.height
-    if (size <= 0) return
-
-    setBrowserDrag({
-      start: browserAxis === 'x' ? event.clientX : event.clientY,
-      startRatio: browserSplit,
-      size,
-      axis: browserAxis,
-    })
-  }
-
-  const browserPaneStyle = (side: 'terminal' | 'browser'): CSSProperties => ({
-    flexBasis: `${(side === 'terminal' ? browserSplit : 1 - browserSplit) * 100}%`,
-  })
-
   const rectFor = (index: number) => {
     const lastRow = layout.lastCount < layout.cols && index >= fullRows * layout.cols
     const rowIndex = lastRow
@@ -827,26 +673,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
                 Buat terminal pertama untuk menjalankan perintah. Panel baru
                 otomatis masuk ke grid dan bisa diatur ukurannya.
               </p>
-              <p className='mx-auto mt-2 flex max-w-md flex-wrap items-center justify-center gap-1 text-[11px] text-muted-foreground'>
-                <span>Tekan</span>
-                <kbd className='rounded border bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
-                  Ctrl
-                </kbd>
-                <span>+</span>
-                <kbd className='rounded border bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
-                  Shift
-                </kbd>
-                <span>+</span>
-                <kbd className='rounded border bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
-                  B
-                </kbd>
-                <span>untuk membuka atau menutup browser.</span>
-              </p>
-              {!isDesktop && (
-                <p className='mt-2 text-[11px] text-amber-500'>
-                  Mode browser: terminal real hanya tersedia di aplikasi desktop.
-                </p>
-              )}
               <Button onClick={addLauncher} className='mt-4 gap-1'>
                 <Plus className='size-4' />
                 Buat terminal pertama
@@ -888,17 +714,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
           </div>
         </div>
       ) : (
-        <div
-          ref={gridRef}
-          className='relative h-full w-full'
-          style={
-            browserOpen
-              ? {
-                  minHeight: `max(100%, ${layout.rows * MIN_TERMINAL_ROW_HEIGHT}px)`,
-                }
-              : undefined
-          }
-        >
+        <div ref={gridRef} className='relative h-full w-full'>
           {tabs.map((tab, index) => {
             const rect = rectFor(index)
             return (
@@ -919,7 +735,7 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
                   tab={tab}
                   active={activeId === tab.id}
                   visible={showTerminal}
-                  suppressResize={Boolean(drag || browserDrag)}
+                  suppressResize={Boolean(drag)}
                   onActivate={handleActivate}
                   onRequestClose={requestClose}
                   onRename={rename}
@@ -1082,25 +898,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
             </div>
 
             <div className='flex shrink-0 items-center gap-2'>
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant='secondary'
-                      size='sm'
-                      aria-pressed={browserOpen}
-                      onClick={() => setBrowserOpen((open) => !open)}
-                      className='h-7 gap-1 px-2 text-[11px]'
-                    >
-                      <Globe className='size-3.5' />
-                      {browserOpen ? 'Tutup browser' : 'Buka browser'}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {browserOpen ? 'Tutup browser' : 'Buka browser'} · Ctrl + Shift + B
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
               <Button
                 size='sm'
                 onClick={addLauncher}
@@ -1112,76 +909,9 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
             </div>
           </div>
 
-          {browserOpen ? (
-            <div
-              ref={browserSplitRef}
-              data-browser-split=''
-              className={cn(
-                'relative min-h-0 flex-1 p-1.5',
-                browserStacked ? 'flex flex-col' : 'flex flex-row'
-              )}
-            >
-              <div
-                ref={browserTerminalPaneRef}
-                data-panel='terminal'
-                className={cn(
-                  'flex min-h-0 min-w-0 flex-col overflow-y-auto rounded-lg border border-border bg-background sidebar-scroll overscroll-contain',
-                  browserStacked ? 'pb-1.5' : 'pr-1.5'
-                )}
-                style={browserPaneStyle('terminal')}
-              >
-                <div className='min-h-0 flex-1 p-1.5'>{terminalArea}</div>
-              </div>
-
-              <div
-                role='separator'
-                aria-orientation={browserStacked ? 'horizontal' : 'vertical'}
-                aria-label='Ubah ukuran panel'
-                onPointerDown={startBrowserDrag}
-                className={cn(
-                  'group relative z-20 flex shrink-0 touch-none items-center justify-center',
-                  browserStacked
-                    ? 'h-2 w-full cursor-row-resize'
-                    : 'h-full w-2 cursor-col-resize'
-                )}
-              >
-                <div
-                  className={cn(
-                    'bg-border transition-colors group-hover:bg-primary/50',
-                    browserStacked ? 'h-px w-full' : 'h-full w-px'
-                  )}
-                />
-                <span
-                  className={cn(
-                    'absolute flex items-center justify-center rounded-full border bg-background',
-                    browserStacked ? 'h-4 w-8' : 'h-8 w-4'
-                  )}
-                >
-                  <GripVertical
-                    className={cn(
-                      'size-3 text-muted-foreground',
-                      browserStacked && 'rotate-90'
-                    )}
-                  />
-                </span>
-              </div>
-
-              <div
-                data-panel='browser'
-                className={cn(
-                  'relative min-h-0 min-w-0 overflow-hidden rounded-lg border border-border bg-background',
-                  browserStacked ? 'mt-1.5' : 'ml-1.5'
-                )}
-                style={browserPaneStyle('browser')}
-              >
-                <BrowserWorkspace visible={showTerminal && browserOpen} embedded />
-              </div>
-            </div>
-          ) : (
-            <div className='relative min-h-0 flex-1 px-1.5 pb-1.5'>
-              {terminalArea}
-            </div>
-          )}
+          <div className='relative min-h-0 flex-1 px-1.5 pb-1.5'>
+            {terminalArea}
+          </div>
         </div>
       </Main>
 
