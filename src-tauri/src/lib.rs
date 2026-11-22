@@ -6,6 +6,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Instant;
 
+mod agent_groups;
 mod orchestrator;
 mod webview_power;
 mod system_monitor;
@@ -1441,6 +1442,9 @@ pub fn run() {
     tauri::Builder::default()
         .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
+            agent_groups::agent_detect,
+            agent_groups::agent_capacity,
+            agent_groups::agent_spawn,
             pty_ensure,
             pty_write,
             pty_resize,

@@ -59,9 +59,6 @@ import {
 import { builtInAgents, type AgentCliItem } from '@/features/agent-cli/data/agents'
 import { ShortcutKeys } from '@/features/agent-cli/components/shortcut-keys'
 import { BrowserWorkspace } from '@/features/browser'
-import { OrchestratorModeSwitch } from '@/features/orchestrator/components/mode-switch'
-import { OrchestratorDock } from '@/features/orchestrator/components/orchestrator-dock'
-import { useOrchestratorStore } from '@/features/orchestrator/store'
 import { ProjectPickerDialog } from './components/project-picker-dialog'
 import { TerminalPane } from './components/terminal-pane'
 import { useTerminalStore } from './store'
@@ -306,9 +303,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
   const closeShortcutInFlight = useRef(false)
   const pendingLaunchRef = useRef<LaunchAction | null>(null)
   const browserAxis = browserStacked ? 'y' : 'x'
-  const orchestratorMode = useOrchestratorStore((state) => state.mode)
-  const hydrateOrchestrator = useOrchestratorStore((state) => state.hydrate)
-  const syncAgents = useOrchestratorStore((state) => state.syncAgents)
 
   const terminalCompact = browserOpen ? browserCompact : compact
   const layout = useMemo(
@@ -428,18 +422,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
       alive = false
     }
   }, [visible])
-
-  useEffect(() => {
-    void hydrateOrchestrator()
-  }, [hydrateOrchestrator])
-
-  useEffect(() => {
-    if (!isDesktop) return
-    void syncAgents(tabs, [
-      ...builtInAgents,
-      ...(agentStore?.customAgents ?? []),
-    ])
-  }, [tabs, agentStore, syncAgents])
 
   const handleActivate = useCallback((id: string) => setActive(id), [setActive])
 
@@ -1100,7 +1082,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
             </div>
 
             <div className='flex shrink-0 items-center gap-2'>
-              <OrchestratorModeSwitch />
               <TooltipProvider delayDuration={200}>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1203,12 +1184,6 @@ export function TerminalWorkspace({ visible = true }: { visible?: boolean }) {
           )}
         </div>
       </Main>
-
-      {visible && orchestratorMode === 'orchestrator' && (
-        <div className='fixed bottom-4 right-4 top-20 z-40 w-[min(420px,calc(100vw-2rem))]'>
-          <OrchestratorDock />
-        </div>
-      )}
 
       <ProjectPickerDialog
         open={pickerOpen}
