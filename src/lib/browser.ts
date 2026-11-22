@@ -24,13 +24,31 @@ type BrowserView = BrowserBounds & { label: string; visible: boolean }
 // (for example the two Brainstorming panes) while each owner only changes its own tabs.
 const browserViews = new Map<string, BrowserView>()
 
+// Only one native webview is shown at a time. If several views are marked visible,
+// the focused one wins; otherwise the first one stays and the rest are hidden.
 function applyBrowserViews(focus: string | null = null): Promise<void> {
+  const visible = Array.from(browserViews.values()).filter((view) => view.visible)
+  if (visible.length > 1) {
+    const keep = visible.find((view) => view.label === focus) ?? visible[0]
+    for (const view of visible) {
+      if (view !== keep) browserViews.set(view.label, { ...view, visible: false })
+    }
+  }
   return enqueueBrowserCommand(() =>
     invoke('browser_tabs_apply', {
       views: Array.from(browserViews.values()),
       focus,
     })
   )
+}
+
+/** Hides every native webview. Owners show their own view again when they become active. */
+export function hideAllBrowserViews(): Promise<void> {
+  if (!isDesktop || browserViews.size === 0) return Promise.resolve()
+  for (const [label, view] of browserViews) {
+    if (view.visible) browserViews.set(label, { ...view, visible: false })
+  }
+  return applyBrowserViews(null)
 }
 
 // Hidden pages that were busy earlier (playing media, in a call) may become idle later,

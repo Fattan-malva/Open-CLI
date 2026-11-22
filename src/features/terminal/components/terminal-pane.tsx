@@ -68,6 +68,7 @@ export const TerminalPane = memo(function TerminalPane({
   const inputBufferRef = useRef('')
   const inputTimerRef = useRef<number | null>(null)
   const exitedRef = useRef(false)
+  const webglRef = useRef<WebglAddon | null>(null)
   const [exited, setExited] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -171,18 +172,6 @@ export const TerminalPane = memo(function TerminalPane({
     term.element?.querySelector('.xterm-viewport')?.classList.add('no-scrollbar')
     termRef.current = term
     fitRef.current = fit
-
-    let webglAddon: WebglAddon | null = null
-    try {
-      webglAddon = new WebglAddon()
-      webglAddon.onContextLoss(() => {
-        webglAddon?.dispose()
-        webglAddon = null
-      })
-      term.loadAddon(webglAddon)
-    } catch {
-      webglAddon = null
-    }
 
     let disposed = false
     let resizeFrame: number | null = null
@@ -302,12 +291,37 @@ export const TerminalPane = memo(function TerminalPane({
       inputTimerRef.current = null
       inputBufferRef.current = ''
       cleanups.forEach((cleanup) => void cleanup())
-      webglAddon?.dispose()
+      webglRef.current?.dispose()
+      webglRef.current = null
       term.dispose()
       termRef.current = null
       fitRef.current = null
     }
   }, [tab.id, tab.shell, tab.cwd, tab.command, ensureSession])
+
+  // GPU rendering only for a terminal that is on screen. Hidden terminals release
+  // their WebGL context, which is the main per-terminal cost on low-spec machines.
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    if (!visible) {
+      webglRef.current?.dispose()
+      webglRef.current = null
+      return
+    }
+    if (webglRef.current) return
+    try {
+      const addon = new WebglAddon()
+      addon.onContextLoss(() => {
+        addon.dispose()
+        if (webglRef.current === addon) webglRef.current = null
+      })
+      term.loadAddon(addon)
+      webglRef.current = addon
+    } catch {
+      webglRef.current = null
+    }
+  }, [visible])
 
   useEffect(() => {
     if (active && visibleRef.current) termRef.current?.focus()

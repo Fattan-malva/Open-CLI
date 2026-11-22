@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect } from 'react'
 import { Outlet, useLocation } from '@tanstack/react-router'
 import { getCookie } from '@/lib/cookies'
 import { cn } from '@/lib/utils'
@@ -12,6 +12,7 @@ import { BrowserWorkspace } from '@/features/browser'
 import { SocialWorkspace } from '@/features/social'
 import { TerminalWorkspace } from '@/features/terminal'
 import { detachOrchestratorListeners } from '@/features/orchestrator/store'
+import { hideAllBrowserViews } from '@/lib/browser'
 import { watchWebviewOverlays } from '@/lib/webview-overlay'
 
 const IdeWorkspace = lazy(() =>
@@ -28,6 +29,12 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
   const socialSite = pathname.startsWith('/social/')
     ? (pathname.split('/')[2] ?? null)
     : null
+
+  // Runs before the panes' effects, so a native webview never stays on top of another menu.
+  // The pane that becomes active shows its own webview again right after this.
+  useLayoutEffect(() => {
+    void hideAllBrowserViews().catch(() => undefined)
+  }, [pathname])
 
   useEffect(() => watchWebviewOverlays(), [])
 
