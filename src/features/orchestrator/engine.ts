@@ -1,6 +1,4 @@
 import * as api from './api'
-import { buildTaskPrompt, clamp } from './context'
-import { generatePlan } from './planner'
 import { isTerminalTaskState } from './state-machines'
 import {
   Evidence,
@@ -38,6 +36,10 @@ export type EngineContext = {
     evidence: EvidenceValue | null
   ) => Promise<api.EvidenceValidationResult>
   buildReport: (input: api.ReportRequest) => Promise<api.FinalReportResult>
+  buildPlanPrompt: (input: api.PlanPromptRequest) => Promise<string>
+  buildTaskPrompt: (input: api.TaskPromptRequest) => Promise<string>
+  parsePlan: (raw: string) => Promise<api.ParsedPlanResult>
+  clamp: (text: string, max: number) => Promise<string>
 }
 
 export const defaultEngineContext: EngineContext = {
@@ -62,6 +64,55 @@ export const defaultEngineContext: EngineContext = {
   shouldUnblock: api.shouldUnblockNative,
   validateEvidence: api.validateEvidenceNative,
   buildReport: api.buildReportNative,
+  buildPlanPrompt: api.buildPlanPromptNative,
+  buildTaskPrompt: api.buildTaskPromptNative,
+  parsePlan: api.parsePlanNative,
+  clamp: api.clampNative,
+}
+
+const PLAN_TIMEOUT_MS = 180000
+
+function planInstruction(artifactDir: string): string {
+  return [
+    'Create the orchestration plan for this request.',
+    `Read the full instructions from ${artifactDir}/plan.prompt.txt.`,
+    `Write ONLY the validated JSON plan to ${artifactDir}/plan.json.`,
+    'Then reply with a single short line: PLAN_WRITTEN',
+  ].join('\n')
+}
+
+async function generatePlanNative(
+  ctx: EngineContext,
+  run: RunValue,
+  sessionId: string,
+  artifactDir: string
+): Promise<api.ParsedPlanResult> {
+  const planPath = `${artifactDir}/plan.json`
+  const prompt = await ctx.buildPlanPrompt({
+    request: run.request,
+    projectRoot: run.projectRoot,
+    existingPlan: run.plan ? JSON.stringify(run.plan) : null,
+    context: run.context,
+  })
+  await ctx.writeArtifact(`${artifactDir}/plan.prompt.txt`, prompt)
+  await ctx.sendPrompt(sessionId, planInstruction(artifactDir))
+  const ready = await ctx.waitForArtifact(planPath, PLAN_TIMEOUT_MS)
+  if (!ready) throw new Error('Planner agent did not write plan.json before the timeout')
+  return ctx.parsePlan(await ctx.readArtifact(planPath))
+}
+
+function toTaskPromptTask(task: TaskValue): api.TaskPromptRequest['task'] {
+  return {
+    id: task.id,
+    title: task.title,
+    objective: task.objective,
+    description: task.description,
+    acceptance: task.acceptance,
+    allowedPaths: task.scope.allowedPaths,
+    forbiddenPaths: task.scope.forbiddenPaths,
+    interfaces: task.scope.interfaces,
+    dependencies: task.dependencies,
+  }
 }
 
 function toDagInput(task: TaskValue | api.DagInput): api.DagInput {
@@ -156,14 +207,7 @@ export async function planRun(
 ): Promise<RunValue> {
   const planning = await setState(ctx, { ...run, coordinatorId: sessionId }, 'planning')
   const dir = await ctx.runDir(planning.id)
-  const { plan } = await generatePlan(planning, planning.context, sessionId, dir, {
-    sendPrompt: ctx.sendPrompt,
-    writeArtifact: ctx.writeArtifact,
-    waitForArtifact: ctx.waitForArtifact,
-    readArtifact: ctx.readArtifact,
-  })
-  const validation = await ctx.validateDag(plan.tasks.map(toDagInput))
-  if (!validation.ok) throw new Error(`Invalid plan: ${validation.issues.map((issue) => issue.message).join('; ')}`)
+  const { plan } = await generatePlanNative(ctx, planning, sessionId, dir)
   const timestamp = now()
   const tasks: TaskValue[] = plan.tasks.map((draft, index) =>
     Task.parse({
@@ -284,7 +328,13 @@ export async function executeRun(ctx: EngineContext, runId: string): Promise<Sna
       }
       await ctx.putTask(assigned)
       const attemptDir = `${dir}/${assigned.id}/attempt-${attempt}`
-      const prompt = buildTaskPrompt(run, assigned, run.context, attemptDir, decision.workspace.path)
+      const prompt = await ctx.buildTaskPrompt({
+        request: run.request,
+        task: toTaskPromptTask(assigned),
+        context: run.context,
+        artifactPath: attemptDir,
+        workspacePath: decision.workspace.path,
+      })
       await ctx.writeArtifact(`${attemptDir}/task.prompt.txt`, prompt)
       await ctx.dispatch(assigned.id, decision.session.id, decision.workspace.id, prompt)
       active.set(decision.session.id, {
@@ -446,12 +496,12 @@ export async function integrateTask(ctx: EngineContext, taskId: string): Promise
   if (task.status !== 'completed') throw new Error('Only completed tasks can be integrated')
   const result = await ctx.integrate(task.workspaceId ?? '', 'worktree')
   if (result.conflict) {
-    await ctx.putTask({ ...task, status: 'conflict', blocker: clamp(result.output, 2000), updatedAt: now() })
+    await ctx.putTask({ ...task, status: 'conflict', blocker: await ctx.clamp(result.output, 2000), updatedAt: now() })
     await emit(ctx, task.runId, task.id, 'workspace.conflict', { output: result.output })
     return
   }
   if (!result.ok) {
-    await ctx.putTask({ ...task, status: 'failed', blocker: clamp(result.output, 2000), updatedAt: now() })
+    await ctx.putTask({ ...task, status: 'failed', blocker: await ctx.clamp(result.output, 2000), updatedAt: now() })
     await emit(ctx, task.runId, task.id, 'validation.result', { ok: false, output: result.output })
     return
   }

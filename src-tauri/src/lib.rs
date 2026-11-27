@@ -1644,7 +1644,11 @@ pub fn run() {
             orchestrator::logic::commands::orchestrator_build_report,
             orchestrator::logic::commands::orchestrator_can_transition_run,
             orchestrator::logic::commands::orchestrator_can_transition_task,
-            orchestrator::logic::commands::orchestrator_can_transition_agent
+            orchestrator::logic::commands::orchestrator_can_transition_agent,
+            orchestrator::logic::commands::orchestrator_build_plan_prompt,
+            orchestrator::logic::commands::orchestrator_build_task_prompt,
+            orchestrator::logic::commands::orchestrator_parse_plan,
+            orchestrator::logic::commands::orchestrator_clamp
         ])
         .setup(|app| {
             if let Err(error) = ensure_agent_cli_file(app.handle()) {

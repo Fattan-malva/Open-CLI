@@ -85,6 +85,65 @@ export type FinalReportResult = {
 
 export type EvidenceValidationResult = { ok: boolean; reasons: string[] }
 
+export type PlanPromptRequest = {
+  request: string
+  projectRoot: string
+  existingPlan: string | null
+  context: unknown
+}
+
+export type TaskPromptRequest = {
+  request: string
+  task: {
+    id: string
+    title: string
+    objective: string
+    description: string
+    acceptance: string[]
+    allowedPaths: string[]
+    forbiddenPaths: string[]
+    interfaces: string[]
+    dependencies: string[]
+  }
+  context: unknown
+  artifactPath: string
+  workspacePath: string
+}
+
+export type ParsedPlanResult = {
+  plan: {
+    rationale: string
+    risks: string[]
+    tasks: (DagInput & {
+      id: string
+      title: string
+      objective: string
+      description: string
+      complexity: 'low' | 'medium' | 'high'
+      risk: 'low' | 'medium' | 'high'
+      requiredCapabilities: string[]
+    })[]
+  }
+  validation: DagValidationResult
+}
+
+/** Prompt construction, plan parsing and output redaction also run natively. */
+export function buildPlanPromptNative(input: PlanPromptRequest): Promise<string> {
+  return invoke<string>('orchestrator_build_plan_prompt', { input })
+}
+
+export function buildTaskPromptNative(input: TaskPromptRequest): Promise<string> {
+  return invoke<string>('orchestrator_build_task_prompt', { input })
+}
+
+export function parsePlanNative(raw: string): Promise<ParsedPlanResult> {
+  return invoke<ParsedPlanResult>('orchestrator_parse_plan', { raw })
+}
+
+export function clampNative(text: string, max: number): Promise<string> {
+  return invoke<string>('orchestrator_clamp', { text, max })
+}
+
 /** Pure DAG, scheduling, validation and report logic runs natively in Rust. */
 export function validateDagNative(tasks: DagInput[]): Promise<DagValidationResult> {
   return invoke<DagValidationResult>('orchestrator_validate_dag', { tasks })
