@@ -1649,7 +1649,12 @@ pub fn run() {
             orchestrator::logic::commands::orchestrator_build_task_prompt,
             orchestrator::logic::commands::orchestrator_parse_plan,
             orchestrator::logic::commands::orchestrator_clamp,
-            orchestrator::logic::commands::orchestrator_crew_snapshot
+            orchestrator::logic::commands::orchestrator_crew_snapshot,
+            orchestrator::engine::orchestrator_create_run,
+            orchestrator::engine::orchestrator_plan_run,
+            orchestrator::engine::orchestrator_prepare_workspaces,
+            orchestrator::engine::orchestrator_execute_run,
+            orchestrator::engine::orchestrator_integrate_task
         ])
         .setup(|app| {
             if let Err(error) = ensure_agent_cli_file(app.handle()) {

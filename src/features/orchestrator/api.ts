@@ -379,3 +379,29 @@ export type CrewSourceRequest = {
 export function crewSnapshotNative(source: CrewSourceRequest, party: string): Promise<CrewSnapshotResult> {
   return invoke<CrewSnapshotResult>('orchestrator_crew_snapshot', { source, party })
 }
+
+/** Run lifecycle: the engine lives in Rust and emits events to the UI as it runs. */
+export function createRunNative(
+  request: string,
+  projectRoot: string,
+  context: unknown,
+  attachments: unknown
+): Promise<RunValue> {
+  return invoke<RunValue>('orchestrator_create_run', { request, projectRoot, context, attachments })
+}
+
+export function planRunNative(runId: string, sessionId: string): Promise<RunValue> {
+  return invoke<RunValue>('orchestrator_plan_run', { runId, sessionId })
+}
+
+export function prepareWorkspacesNative(runId: string): Promise<TaskValue[]> {
+  return invoke<TaskValue[]>('orchestrator_prepare_workspaces', { runId })
+}
+
+export function executeRunNative(runId: string): Promise<unknown> {
+  return invoke<unknown>('orchestrator_execute_run', { runId })
+}
+
+export function integrateTaskNative(taskId: string): Promise<void> {
+  return invoke<void>('orchestrator_integrate_task', { taskId })
+}

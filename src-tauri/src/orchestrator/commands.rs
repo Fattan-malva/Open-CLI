@@ -35,7 +35,7 @@ fn normalize_path(path: PathBuf) -> PathBuf {
     result
 }
 
-fn orchestrator_root(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn orchestrator_root(app: &AppHandle) -> Result<PathBuf, String> {
     let root = app
         .path()
         .app_data_dir()
@@ -45,7 +45,7 @@ fn orchestrator_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(root)
 }
 
-fn safe_artifact_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+pub(crate) fn safe_artifact_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
     let root = orchestrator_root(app)?;
     let candidate = Path::new(path);
     let candidate = if candidate.is_absolute() {
@@ -60,7 +60,7 @@ fn safe_artifact_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
     Ok(normalized)
 }
 
-fn emit_event(app: &AppHandle, store: &OrchestratorStore, event: &Value) -> Result<Value, String> {
+pub(crate) fn emit_event(app: &AppHandle, store: &OrchestratorStore, event: &Value) -> Result<Value, String> {
     let sequence = event
         .get("sequence")
         .and_then(Value::as_i64)
@@ -178,25 +178,28 @@ pub async fn orchestrator_artifact_read(app: AppHandle, path: String) -> Result<
     std::fs::read_to_string(path).map_err(|error| error.to_string())
 }
 
+/// Blocks until the artifact exists or the timeout passes. Call from a blocking thread.
+pub(crate) fn artifact_ready(app: &AppHandle, path: &str, timeout_ms: u64) -> Result<bool, String> {
+    let path = safe_artifact_path(app, path)?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(600_000));
+    while Instant::now() < deadline {
+        if path.is_file() {
+            return Ok(true);
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    Ok(path.is_file())
+}
+
 #[tauri::command(async)]
 pub async fn orchestrator_artifact_wait(
     app: AppHandle,
     path: String,
     timeout_ms: u64,
 ) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = safe_artifact_path(&app, &path)?;
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(600_000));
-        while Instant::now() < deadline {
-            if path.is_file() {
-                return Ok(true);
-            }
-            std::thread::sleep(Duration::from_millis(150));
-        }
-        Ok(path.is_file())
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || artifact_ready(&app, &path, timeout_ms))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 fn agent_launch(
@@ -216,10 +219,10 @@ fn agent_launch(
     Ok((optional("shell"), optional("cwd"), optional("command")))
 }
 
-fn ensure_agent_session(
+pub(crate) fn ensure_agent_session(
     app: &AppHandle,
-    pty: &State<'_, PtyState>,
-    store: &State<'_, OrchestratorStore>,
+    pty: &PtyState,
+    store: &OrchestratorStore,
     session_id: &str,
 ) -> Result<(), String> {
     let exists = pty
@@ -235,7 +238,7 @@ fn ensure_agent_session(
     Ok(())
 }
 
-fn workspace_by_id(store: &OrchestratorStore, id: &str) -> Result<Value, String> {
+pub(crate) fn workspace_by_id(store: &OrchestratorStore, id: &str) -> Result<Value, String> {
     store
         .get("workspaces", id)?
         .ok_or_else(|| format!("workspace {} not found", id))
@@ -250,10 +253,21 @@ pub async fn orchestrator_workspace_create(
     root: String,
     isolation_mode: String,
 ) -> Result<Value, String> {
-    let worktrees = orchestrator_root(&app)?.join("worktrees");
-    let workspace = git::create_worktree(&root, &run_id, &task_id, &isolation_mode, &worktrees)?;
+    create_workspace(&app, &store, &run_id, &task_id, &root, &isolation_mode)
+}
+
+pub(crate) fn create_workspace(
+    app: &AppHandle,
+    store: &OrchestratorStore,
+    run_id: &str,
+    task_id: &str,
+    root: &str,
+    isolation_mode: &str,
+) -> Result<Value, String> {
+    let worktrees = orchestrator_root(app)?.join("worktrees");
+    let workspace = git::create_worktree(root, run_id, task_id, isolation_mode, &worktrees)?;
     let id = string_field(&workspace, "id")?;
-    store.upsert("workspaces", &id, &run_id, &isolation_mode, &workspace)
+    store.upsert("workspaces", &id, run_id, isolation_mode, &workspace)
 }
 
 #[tauri::command(async)]
@@ -302,8 +316,18 @@ pub async fn orchestrator_send_prompt(
     session_id: String,
     prompt: String,
 ) -> Result<(), String> {
-    ensure_agent_session(&app, &pty, &store, &session_id)?;
-    pty_write_session(&pty, &session_id, &format!("{}\r", prompt))
+    send_prompt(&app, &pty, &store, &session_id, &prompt)
+}
+
+pub(crate) fn send_prompt(
+    app: &AppHandle,
+    pty: &PtyState,
+    store: &OrchestratorStore,
+    session_id: &str,
+    prompt: &str,
+) -> Result<(), String> {
+    ensure_agent_session(app, pty, store, session_id)?;
+    pty_write_session(pty, session_id, &format!("{}\r", prompt))
 }
 
 #[tauri::command(async)]
@@ -316,16 +340,28 @@ pub async fn orchestrator_dispatch(
     workspace_id: String,
     prompt: String,
 ) -> Result<(), String> {
-    ensure_agent_session(&app, &pty, &store, &session_id)?;
-    let workspace = workspace_by_id(&store, &workspace_id)?;
+    dispatch_prompt(&app, &pty, &store, &task_id, &session_id, &workspace_id, &prompt)
+}
+
+pub(crate) fn dispatch_prompt(
+    app: &AppHandle,
+    pty: &PtyState,
+    store: &OrchestratorStore,
+    task_id: &str,
+    session_id: &str,
+    workspace_id: &str,
+    prompt: &str,
+) -> Result<(), String> {
+    ensure_agent_session(app, pty, store, session_id)?;
+    let workspace = workspace_by_id(store, workspace_id)?;
     let path = string_field(&workspace, "path")?;
     let cd = if cfg!(windows) {
         format!("cd /d \"{}\"\r", path)
     } else {
         format!("cd \"{}\"\r", path)
     };
-    pty_write_session(&pty, &session_id, &cd)?;
-    pty_write_session(&pty, &session_id, &format!("{}\r", prompt))?;
+    pty_write_session(pty, session_id, &cd)?;
+    pty_write_session(pty, session_id, &format!("{}\r", prompt))?;
     let timestamp = now();
     let run_id = string_field(&workspace, "runId")?;
     let assignment = json!({
@@ -346,7 +382,7 @@ pub async fn orchestrator_dispatch(
         "timestamp": timestamp,
         "payload": { "sessionId": session_id, "workspaceId": workspace_id },
     });
-    store.upsert("events", &task_id, &run_id, "task.dispatched", &event)?;
+    store.upsert("events", task_id, &run_id, "task.dispatched", &event)?;
     Ok(())
 }
 

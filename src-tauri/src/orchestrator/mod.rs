@@ -1,5 +1,6 @@
 pub mod browser_bridge;
 pub mod commands;
+pub mod engine;
 pub mod git;
 pub mod logic;
 pub mod store;

@@ -3,17 +3,7 @@ import { loadAgentCliStore } from '@/lib/agent-cli-store'
 import { useTerminalStore } from '@/features/terminal/store'
 import * as api from './api'
 import { browserBridgeStart, browserBridgeStop } from './api'
-import {
-  createRun,
-  defaultEngineContext,
-  emit,
-  executeRun,
-  integrateTask,
-  newId,
-  planRun,
-  prepareWorkspaces,
-  type EngineContext,
-} from './engine'
+import { defaultEngineContext, emit, newId, type EngineContext } from './engine'
 import { applyEvent, EventHub } from './events'
 import { isTerminalTaskState } from './state-machines'
 import {
@@ -299,8 +289,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     try {
       const state = get()
       const agentData = await loadAgentCliStore()
-      const run = await createRun(
-        state.engine,
+      const run = await api.createRunNative(
         trimmed,
         agentData.projectPath ?? '',
         state.context,
@@ -353,7 +342,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     }
     set({ busy: true, error: null })
     try {
-      const planned = await planRun(state.engine, run, coordinator.id)
+      const planned = await api.planRunNative(run.id, coordinator.id)
       const snapshot = await state.engine.snapshot()
       set({
         snapshot,
@@ -438,8 +427,8 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       const snapshotAfterPlan = await state.engine.snapshot()
       const tasks = snapshotAfterPlan.tasks.filter((task) => task.runId === run.id)
       if (tasks.length === 0) throw new Error('Planner produced no tasks')
-      await prepareWorkspaces(state.engine, run, tasks)
-      await executeRun(state.engine, run.id)
+      await api.prepareWorkspacesNative(run.id)
+      await api.executeRunNative(run.id)
       const snapshot = await state.engine.snapshot()
       const finalRun = snapshot.runs.find((item) => item.id === run.id)
       set({
@@ -499,7 +488,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   integrate: async (taskId) => {
     set({ busy: true, error: null })
     try {
-      await integrateTask(get().engine, taskId)
+      await api.integrateTaskNative(taskId)
       set({ snapshot: await get().engine.snapshot(), busy: false })
     } catch (error) {
       set({ busy: false, error: error instanceof Error ? error.message : String(error) })
