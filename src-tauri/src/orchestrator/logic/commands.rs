@@ -1,3 +1,4 @@
+use super::crew::{build_crew, CrewSnapshot, CrewSource};
 use super::context::{build_plan_prompt, build_task_prompt, clamp, PlanPromptInput, TaskPromptInput};
 use super::dag::{validate_dag, DagTask, DagValidation};
 use super::planner::{parse_plan, ParsedPlan};
@@ -71,4 +72,9 @@ pub fn orchestrator_parse_plan(raw: String) -> Result<ParsedPlan, String> {
 #[tauri::command]
 pub fn orchestrator_clamp(text: String, max: usize) -> String {
     clamp(&text, max)
+}
+
+#[tauri::command]
+pub fn orchestrator_crew_snapshot(source: CrewSource, party: String) -> CrewSnapshot {
+    build_crew(&source, &party)
 }

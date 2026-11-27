@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useOrchestratorStore } from '@/features/orchestrator/store'
 import { DiffReview } from '@/features/orchestrator/review/diff-review'
+import { CrewPanel } from '@/features/orchestrator/crew/crew-panel'
 import type { TaskValue } from '@/features/orchestrator/types'
 
 export function OrchestratorPanel() {
@@ -111,6 +112,8 @@ export function OrchestratorPanel() {
         </div>
 
         <div className='flex min-h-0 flex-col gap-3 overflow-y-auto'>
+          <CrewPanel snapshot={snapshot} />
+
           <section className='rounded-md border'>
             <div className='border-b px-3 py-2 text-xs font-medium'>Run terbaru</div>
             <div className='space-y-1 p-2 text-xs'>

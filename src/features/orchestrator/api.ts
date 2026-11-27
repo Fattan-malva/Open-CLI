@@ -349,3 +349,33 @@ export function browserBridgeStart(tabLabel: string, agentId: string): Promise<B
 export function browserBridgeStop(token: string): Promise<void> {
   return call('orchestrator_browser_bridge_stop', { token }, undefined, undefined)
 }
+
+export type CrewGroup = 'needsYou' | 'working' | 'idle' | 'failed'
+
+export type CrewRowResult = {
+  partyKey: string
+  role: 'manager' | 'worker'
+  label: string
+  status: string
+  group: CrewGroup
+  taskTitle: string | null
+  latest: { preview: string; at: string; sequence: number } | null
+}
+
+export type CrewSnapshotResult = {
+  status: 'ok'
+  sections: { managedBy: CrewRowResult[]; managing: CrewRowResult[]; talkingWith: CrewRowResult[] }
+  summary: { agents: number; needsYou: number }
+}
+
+export type CrewSourceRequest = {
+  runs: { id: string; coordinatorId: string | null }[]
+  tasks: { id: string; runId: string; title: string; status: string | null; ownerSessionId: string | null }[]
+  events: { taskId: string | null; sequence: number; timestamp: string; preview: string }[]
+  agents: { id: string; label: string; agentId: string }[]
+}
+
+/** The crew read model is built natively from the run, task, event and agent records. */
+export function crewSnapshotNative(source: CrewSourceRequest, party: string): Promise<CrewSnapshotResult> {
+  return invoke<CrewSnapshotResult>('orchestrator_crew_snapshot', { source, party })
+}

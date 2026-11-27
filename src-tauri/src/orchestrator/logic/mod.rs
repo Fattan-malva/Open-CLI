@@ -3,6 +3,7 @@
 
 pub mod commands;
 pub mod context;
+pub mod crew;
 pub mod dag;
 pub mod planner;
 pub mod scheduler;
