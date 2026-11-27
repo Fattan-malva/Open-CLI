@@ -5,3 +5,4 @@ pub mod next_action;
 pub mod outcome;
 pub mod status_index;
 pub mod types;
+pub mod worker_projection;

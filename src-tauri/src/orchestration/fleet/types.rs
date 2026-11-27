@@ -50,6 +50,30 @@ pub struct FleetDurableWorker {
     #[serde(default)]
     pub pending_approval: bool,
     pub resource: Option<FleetResource>,
+    /// Attempt outcome from the attempt-observation projection, when it has one.
+    #[serde(default)]
+    pub outcome: Option<super::outcome::WorkerOutcome>,
+    /// `reclaimable`, `released`, or the exit reason the host recorded.
+    #[serde(default)]
+    pub termination_reason: Option<String>,
+    /// Its terminal went to this follow-up, with the shared row it last held when one names it.
+    #[serde(default)]
+    pub handed_on: Option<HandedOn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandedOn {
+    pub to_dispatch_id: String,
+    pub resource: Option<HandedOnResource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandedOnResource {
+    pub id: String,
+    pub owner_dispatch_id: String,
+    pub release_state: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

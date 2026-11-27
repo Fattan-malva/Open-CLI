@@ -119,6 +119,9 @@ mod tests {
             pending_input: false,
             pending_approval: false,
             resource: None,
+            outcome: None,
+            termination_reason: None,
+            handed_on: None,
         }
     }
 
