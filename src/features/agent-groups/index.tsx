@@ -5,19 +5,17 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { Globe, MessageSquare, Plus, RefreshCw, Send, Square, SquareTerminal, Workflow, X } from 'lucide-react'
+import { Globe, MessageSquare, Plus, RefreshCw, Send, Square, SquareTerminal, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { BrowserWorkspace } from '@/features/browser'
 import { hideAllBrowserViews } from '@/lib/browser'
 import { cn } from '@/lib/utils'
 import { type Agent, useAgentGroupStore } from './store'
-import { OrchestratorPanel } from './orchestrator-panel'
 
 const PREVIEW_LINES = 40
 const LAYOUT_KEY = 'opencli.agent-groups.layout.v1'
 
-type Mode = 'agents' | 'orchestrator'
 
 type StoredLayout = {
   sidebarWidth: number
@@ -241,7 +239,6 @@ export function AgentGroupWorkspace() {
 
   const [newGroupName, setNewGroupName] = useState('')
   const [draft, setDraft] = useState('')
-  const [mode, setMode] = useState<Mode>('agents')
   const [browserOpen, setBrowserOpen] = useState(false)
   const [layout] = useState(loadLayout)
   const [sidebarWidth, setSidebarWidth] = useState(layout.sidebarWidth)
@@ -290,25 +287,6 @@ export function AgentGroupWorkspace() {
           {running.length} / {max} agent aktif
           {capacity ? ` · ${capacity.cpus} core · ${Math.round(capacity.memoryMb / 1024)} GB` : ''}
         </span>
-        <div className='ml-auto flex items-center gap-1 rounded-md border p-0.5'>
-          <Button
-            variant={mode === 'agents' ? 'secondary' : 'ghost'}
-            size='sm'
-            className='h-7 px-2 text-xs'
-            onClick={() => setMode('agents')}
-          >
-            Agent
-          </Button>
-          <Button
-            variant={mode === 'orchestrator' ? 'secondary' : 'ghost'}
-            size='sm'
-            className='h-7 gap-1 px-2 text-xs'
-            onClick={() => setMode('orchestrator')}
-          >
-            <Workflow className='size-3.5' />
-            Orchestrator
-          </Button>
-        </div>
         <Button
           variant={browserOpen ? 'secondary' : 'outline'}
           size='sm'
@@ -415,9 +393,7 @@ export function AgentGroupWorkspace() {
         />
 
         <main className='flex min-w-0 flex-1 flex-col'>
-          {mode === 'orchestrator' ? (
-            <OrchestratorPanel />
-          ) : !group ? (
+          {!group ? (
             <div className='flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground'>
               Pilih grup di kiri atau buat grup baru.
             </div>

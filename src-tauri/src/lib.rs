@@ -7,7 +7,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 mod agent_groups;
-mod orchestrator;
+mod browser_bridge;
 mod system_monitor;
 mod user_tasks;
 mod webview_power;
@@ -765,13 +765,13 @@ fn close_browser_webviews(app: &AppHandle) -> Result<(), String> {
         .filter(|label| label.starts_with("browser-tab-") || label == BROWSER_WEBVIEW_LABEL)
         .collect();
 
-    let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
-    let bridge_state = orchestrator::browser_bridge::BrowserBridgeState {
+    let bridge = app.state::<browser_bridge::BrowserBridgeState>();
+    let bridge_state = browser_bridge::BrowserBridgeState {
         grants: bridge.grants.clone(),
         stops: bridge.stops.clone(),
     };
     for label in labels {
-        orchestrator::browser_bridge::stop_for_tab(&bridge_state, &label)?;
+        browser_bridge::stop_for_tab(&bridge_state, &label)?;
         webview_power::forget(&label);
         if let Some(webview) = app.get_webview(&label) {
             webview.close().map_err(|error| error.to_string())?;
@@ -869,7 +869,7 @@ struct BrowserView {
 /// Each label is shown or hidden independently, so panes can be visible at once.
 /// Labels of tabs an agent currently controls through the browser bridge.
 fn agent_granted_labels(app: &AppHandle) -> Result<std::collections::HashSet<String>, String> {
-    let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
+    let bridge = app.state::<browser_bridge::BrowserBridgeState>();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
@@ -954,12 +954,12 @@ async fn browser_tab_snapshot(app: AppHandle, label: String) -> Result<String, S
 
 #[tauri::command]
 async fn browser_tab_close(app: AppHandle, label: String) -> Result<(), String> {
-    let bridge = app.state::<orchestrator::browser_bridge::BrowserBridgeState>();
-    let bridge_state = orchestrator::browser_bridge::BrowserBridgeState {
+    let bridge = app.state::<browser_bridge::BrowserBridgeState>();
+    let bridge_state = browser_bridge::BrowserBridgeState {
         grants: bridge.grants.clone(),
         stops: bridge.stops.clone(),
     };
-    orchestrator::browser_bridge::stop_for_tab(&bridge_state, &label)?;
+    browser_bridge::stop_for_tab(&bridge_state, &label)?;
     webview_power::forget(&label);
     if let Some(webview) = app.get_webview(&label) {
         webview.close().map_err(|error| error.to_string())?;
@@ -1616,45 +1616,8 @@ pub fn run() {
             user_tasks::user_todo_create,
             user_tasks::user_todo_update,
             user_tasks::user_todo_delete,
-            orchestrator::commands::orchestrator_snapshot,
-            orchestrator::commands::orchestrator_upsert_run,
-            orchestrator::commands::orchestrator_upsert_task,
-            orchestrator::commands::orchestrator_emit_event,
-            orchestrator::commands::orchestrator_next_event_id,
-            orchestrator::commands::orchestrator_register_agent,
-            orchestrator::commands::orchestrator_unregister_agent,
-            orchestrator::commands::orchestrator_run_dir,
-            orchestrator::commands::orchestrator_artifact_write,
-            orchestrator::commands::orchestrator_artifact_read,
-            orchestrator::commands::orchestrator_artifact_wait,
-            orchestrator::commands::orchestrator_workspace_create,
-            orchestrator::commands::orchestrator_workspace_status,
-            orchestrator::commands::orchestrator_workspace_diff,
-            orchestrator::commands::orchestrator_send_prompt,
-            orchestrator::commands::orchestrator_dispatch,
-            orchestrator::commands::orchestrator_run_command,
-            orchestrator::commands::orchestrator_integrate,
-            orchestrator::commands::orchestrator_recover,
-            orchestrator::commands::orchestrator_browser_bridge_start,
-            orchestrator::commands::orchestrator_browser_bridge_stop,
-            orchestrator::logic::commands::orchestrator_validate_dag,
-            orchestrator::logic::commands::orchestrator_select_dispatchable,
-            orchestrator::logic::commands::orchestrator_should_unblock,
-            orchestrator::logic::commands::orchestrator_validate_evidence,
-            orchestrator::logic::commands::orchestrator_build_report,
-            orchestrator::logic::commands::orchestrator_can_transition_run,
-            orchestrator::logic::commands::orchestrator_can_transition_task,
-            orchestrator::logic::commands::orchestrator_can_transition_agent,
-            orchestrator::logic::commands::orchestrator_build_plan_prompt,
-            orchestrator::logic::commands::orchestrator_build_task_prompt,
-            orchestrator::logic::commands::orchestrator_parse_plan,
-            orchestrator::logic::commands::orchestrator_clamp,
-            orchestrator::logic::commands::orchestrator_crew_snapshot,
-            orchestrator::engine::orchestrator_create_run,
-            orchestrator::engine::orchestrator_plan_run,
-            orchestrator::engine::orchestrator_prepare_workspaces,
-            orchestrator::engine::orchestrator_execute_run,
-            orchestrator::engine::orchestrator_integrate_task
+            browser_bridge::browser_bridge_start,
+            browser_bridge::browser_bridge_stop,
         ])
         .setup(|app| {
             if let Err(error) = ensure_agent_cli_file(app.handle()) {
@@ -1663,7 +1626,7 @@ pub fn run() {
             if let Err(error) = user_tasks::init(app.handle()) {
                 eprintln!("Gagal menyiapkan tasks/tasks.sqlite: {}", error);
             }
-            orchestrator::init(app.handle());
+            app.manage(browser_bridge::BrowserBridgeState::default());
             if read_browser_privacy(app.handle()).session_only {
                 if let Err(error) = clear_browsing_data(app.handle()) {
                     eprintln!("Gagal membersihkan data browser: {}", error);

@@ -450,3 +450,28 @@ mod tests {
         assert!(!is_authorized(request, "secret123"));
     }
 }
+
+#[tauri::command(async)]
+pub async fn browser_bridge_start(
+    app: AppHandle,
+    browser: tauri::State<'_, BrowserBridgeState>,
+    tab_label: String,
+    agent_id: String,
+) -> Result<Value, String> {
+    let grant = start(&app, &browser, &tab_label, &agent_id)?;
+    Ok(json!({
+        "token": grant.token,
+        "port": grant.port,
+        "tabLabel": grant.tab_label,
+        "agentId": grant.agent_id,
+        "expiresAt": grant.expires_at,
+    }))
+}
+
+#[tauri::command(async)]
+pub async fn browser_bridge_stop(
+    browser: tauri::State<'_, BrowserBridgeState>,
+    token: String,
+) -> Result<(), String> {
+    stop(&browser, &token)
+}

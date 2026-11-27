@@ -11,7 +11,6 @@ import { BrainstormingWorkspace } from '@/features/brainstorming'
 import { BrowserWorkspace } from '@/features/browser'
 import { SocialWorkspace } from '@/features/social'
 import { TerminalWorkspace } from '@/features/terminal'
-import { detachOrchestratorListeners } from '@/features/orchestrator/store'
 import { hideAllBrowserViews } from '@/lib/browser'
 import { watchWebviewOverlays } from '@/lib/webview-overlay'
 
@@ -38,7 +37,6 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
 
   useEffect(() => watchWebviewOverlays(), [])
 
-  useEffect(() => () => detachOrchestratorListeners(), [])
 
   return (
     <SearchProvider>

@@ -2,16 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Eye, EyeOff, Share2, Unplug } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAgentGroupStore } from '@/features/agent-groups/store'
-import { useOrchestratorStore } from '@/features/orchestrator/store'
+import { useBridgeStore } from './bridge-store'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 export function BridgeControls({ tabLabel }: { tabLabel: string | null }) {
   const agents = useAgentGroupStore((state) => state.agents)
-  const grants = useOrchestratorStore((state) => state.grants)
-  const shareBrowser = useOrchestratorStore((state) => state.shareBrowser)
-  const revokeBrowser = useOrchestratorStore((state) => state.revokeBrowser)
-  const pruneGrants = useOrchestratorStore((state) => state.pruneGrants)
+  const grants = useBridgeStore((state) => state.grants)
+  const shareBrowser = useBridgeStore((state) => state.shareBrowser)
+  const revokeBrowser = useBridgeStore((state) => state.revokeBrowser)
+  const pruneGrants = useBridgeStore((state) => state.pruneGrants)
   const [selectedAgent, setSelectedAgent] = useState('')
   const [revealed, setRevealed] = useState(false)
   const copiedTokens = useRef<string[]>([])

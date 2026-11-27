@@ -44,7 +44,7 @@ import {
   syncBrowserTabs,
   type BrowserBounds,
 } from '@/lib/browser'
-import { useOrchestratorStore } from '@/features/orchestrator/store'
+import { useBridgeStore } from './bridge-store'
 import { isDesktop } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import {
@@ -608,7 +608,7 @@ export function BrowserWorkspace({
       }
 
       pendingTitles.current.delete(tabs[index].label)
-      useOrchestratorStore.getState().forgetTabGrants(tabs[index].label)
+      useBridgeStore.getState().forgetTabGrants(tabs[index].label)
       setTabs(next)
       if (activeId === id) setActiveId(fallback?.id ?? null)
     },
