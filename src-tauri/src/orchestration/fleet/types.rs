@@ -20,6 +20,8 @@ pub struct FleetResource {
     pub owner_dispatch_id: String,
     pub worktree_id: Option<String>,
     pub pane_key: Option<String>,
+    #[serde(default)]
+    pub process_incarnation: Option<String>,
     pub host_scope: Option<String>,
     pub ownership_state: String,
     pub release_state: String,
@@ -54,8 +56,20 @@ pub struct FleetDurableWorker {
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub enum Liveness {
     Live { observed_at: i64, source: String },
-    Unverifiable { reason: String },
+    Unverifiable {
+        reason: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_at: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
     Exited { source: String },
+}
+
+impl Liveness {
+    pub fn unverifiable(reason: &str) -> Self {
+        Liveness::Unverifiable { reason: reason.into(), observed_at: None, detail: None }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

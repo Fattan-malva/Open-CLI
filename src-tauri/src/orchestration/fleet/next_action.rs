@@ -148,6 +148,7 @@ mod tests {
             owner_dispatch_id: "d1".into(),
             worktree_id: None,
             pane_key: None,
+            process_incarnation: None,
             host_scope: None,
             ownership_state: "owned".into(),
             release_state: "pending".into(),
@@ -164,7 +165,7 @@ mod tests {
         let w = worker("ready");
         let exited = Liveness::Exited { source: "execution_host".into() };
         assert_eq!(project_next_action(&w, &exited, true).kind, NextActionKind::Recover);
-        let unknown = Liveness::Unverifiable { reason: "missing_status".into() };
+        let unknown = Liveness::unverifiable("missing_status");
         assert_eq!(project_next_action(&w, &unknown, false).kind, NextActionKind::None);
     }
 
