@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 mod agent_groups;
 mod browser_bridge;
+mod orchestration;
 mod system_monitor;
 mod user_tasks;
 mod webview_power;
