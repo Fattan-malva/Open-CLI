@@ -3,6 +3,8 @@ import { RefreshCw, Send, Unplug } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useOrchestratorStore } from '@/features/orchestrator/store'
+import { DiffReview } from '@/features/orchestrator/review/diff-review'
+import type { TaskValue } from '@/features/orchestrator/types'
 
 export function OrchestratorPanel() {
   const snapshot = useOrchestratorStore((state) => state.snapshot)
@@ -18,6 +20,7 @@ export function OrchestratorPanel() {
   const clearError = useOrchestratorStore((state) => state.clearError)
   const pruneGrants = useOrchestratorStore((state) => state.pruneGrants)
   const [draft, setDraft] = useState('')
+  const [reviewTask, setReviewTask] = useState<TaskValue | null>(null)
 
   useEffect(() => {
     if (!hydrated) void hydrate()
@@ -33,6 +36,16 @@ export function OrchestratorPanel() {
 
   const recentRuns = snapshot.runs.slice(-4).reverse()
   const recentTasks = snapshot.tasks.slice(-6).reverse()
+
+  if (reviewTask) {
+    return (
+      <DiffReview
+        task={reviewTask}
+        agents={snapshot.agents}
+        onClose={() => setReviewTask(null)}
+      />
+    )
+  }
 
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-3 p-4'>
@@ -119,6 +132,16 @@ export function OrchestratorPanel() {
                 <div key={task.id} className='flex items-center gap-2 rounded-md bg-muted/50 p-2'>
                   <span className='min-w-0 flex-1 truncate'>{task.title}</span>
                   <span className='text-muted-foreground'>{task.status}</span>
+                  {task.workspaceId && (
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      className='h-6 px-2'
+                      onClick={() => setReviewTask(task)}
+                    >
+                      Tinjau
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
