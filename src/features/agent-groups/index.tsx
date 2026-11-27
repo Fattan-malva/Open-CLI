@@ -5,7 +5,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { Globe, Plus, RefreshCw, Send, Square, Workflow, X } from 'lucide-react'
+import { Globe, MessageSquare, Plus, RefreshCw, Send, Square, SquareTerminal, Workflow, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { BrowserWorkspace } from '@/features/browser'
@@ -109,11 +109,28 @@ const AgentCard = memo(function AgentCard({
   onKill: () => void
 }) {
   const outputRef = useRef<HTMLPreElement>(null)
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const view = useAgentGroupStore((state) => state.views[agent.id] ?? 'terminal')
+  const messages = useAgentGroupStore((state) => state.chats[agent.id])
+  const setView = useAgentGroupStore((state) => state.setView)
+  const sendChat = useAgentGroupStore((state) => state.sendChat)
+  const [draft, setDraft] = useState('')
 
   useEffect(() => {
     const node = outputRef.current
     if (node) node.scrollTop = node.scrollHeight
   }, [agent.output])
+
+  useEffect(() => {
+    const node = transcriptRef.current
+    if (node) node.scrollTop = node.scrollHeight
+  }, [messages])
+
+  const submitChat = () => {
+    if (!draft.trim()) return
+    sendChat(agent.id, draft)
+    setDraft('')
+  }
 
   return (
     <div
@@ -134,6 +151,16 @@ const AgentCard = memo(function AgentCard({
         <span className='text-xs text-muted-foreground'>
           {agent.status === 'running' ? 'aktif' : 'berhenti'}
         </span>
+        <Button
+          variant='ghost'
+          size='icon'
+          aria-label={view === 'chat' ? 'Tampilkan terminal' : 'Tampilkan chat'}
+          title={view === 'chat' ? 'Terminal' : 'Chat'}
+          className='size-7'
+          onClick={(event) => { event.stopPropagation(); setView(agent.id, view === 'chat' ? 'terminal' : 'chat') }}
+        >
+          {view === 'chat' ? <SquareTerminal className='size-3.5' /> : <MessageSquare className='size-3.5' />}
+        </Button>
         <Button variant='ghost' size='sm' onClick={(event) => { event.stopPropagation(); onMove() }}>
           Pindah
         </Button>
@@ -149,12 +176,47 @@ const AgentCard = memo(function AgentCard({
           </Button>
         )}
       </div>
-      <pre
-        ref={outputRef}
-        className='h-56 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed'
-      >
-        {tailLines(agent.output) || (agent.status === 'running' ? 'Menunggu output…' : 'Tidak ada output.')}
-      </pre>
+      {view === 'chat' ? (
+        <div className='flex h-56 flex-col'>
+          <div ref={transcriptRef} className='flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3 text-xs leading-relaxed'>
+            {!messages?.length && <p className='text-muted-foreground'>Belum ada percakapan.</p>}
+            {messages?.map((message) => (
+              <div
+                key={message.id}
+                className={cn(
+                  'whitespace-pre-wrap break-words rounded-md px-2.5 py-1.5',
+                  message.role === 'user' ? 'ml-8 bg-primary text-primary-foreground' : 'mr-8 bg-muted font-mono'
+                )}
+              >
+                {message.text}
+              </div>
+            ))}
+          </div>
+          <form
+            className='flex gap-2 border-t p-2'
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => { event.preventDefault(); submitChat() }}
+          >
+            <Input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder={agent.status === 'running' ? 'Kirim pesan ke agent…' : 'Agent berhenti'}
+              disabled={agent.status !== 'running'}
+              className='h-8 text-xs'
+            />
+            <Button type='submit' size='sm' disabled={agent.status !== 'running' || !draft.trim()}>
+              Kirim
+            </Button>
+          </form>
+        </div>
+      ) : (
+        <pre
+          ref={outputRef}
+          className='h-56 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed'
+        >
+          {tailLines(agent.output) || (agent.status === 'running' ? 'Menunggu output…' : 'Tidak ada output.')}
+        </pre>
+      )}
     </div>
   )
 })

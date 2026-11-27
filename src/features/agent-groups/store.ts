@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { onPtyData, onPtyExit, ptyKill, ptyWrite } from '@/lib/pty'
+import { appendAgentChunk, appendUserMessage, type AgentView, type ChatMessage } from './chat-model'
 import { loadAgentCliStore } from '@/lib/agent-cli-store'
 import { isDesktop } from '@/lib/platform'
 import {
@@ -36,6 +37,10 @@ type Prompt = { id: string; groupId: string; text: string; at: number; sent: num
 type AgentState = {
   groups: Group[]
   agents: Record<string, Agent>
+  chats: Record<string, ChatMessage[]>
+  views: Record<string, AgentView>
+  setView: (agentId: string, view: AgentView) => void
+  sendChat: (agentId: string, text: string) => void
   prompts: Prompt[]
   detected: DetectedAgent[]
   capacity: AgentCapacity | null
@@ -94,13 +99,16 @@ function flushOutput(set: (fn: (state: AgentState) => Partial<AgentState>) => vo
   pendingOutput.clear()
   set((state) => {
     const agents = { ...state.agents }
+    const chats = { ...state.chats }
     for (const [id, chunk] of updates) {
       const agent = agents[id]
       if (!agent) continue
-      const text = agent.output + cleanOutputChunk(chunk)
+      const cleaned = cleanOutputChunk(chunk)
+      const text = agent.output + cleaned
       agents[id] = { ...agent, output: text.length > OUTPUT_LIMIT ? text.slice(-OUTPUT_LIMIT) : text }
+      chats[id] = appendAgentChunk(chats[id] ?? [], cleaned)
     }
-    return { agents }
+    return { agents, chats }
   })
 }
 
@@ -133,6 +141,8 @@ export const useAgentGroupStore = create<AgentState>((set, get) => {
   return {
     groups: loadGroups(),
     agents: {},
+    chats: {},
+    views: {},
     prompts: [],
     detected: [],
     capacity: null,
@@ -177,6 +187,15 @@ export const useAgentGroupStore = create<AgentState>((set, get) => {
 
     selectGroup: (id) => set({ selectedGroupId: id }),
     focusAgent: (id) => set({ focusedAgentId: id }),
+    setView: (agentId, view) => set((state) => ({ views: { ...state.views, [agentId]: view } })),
+    sendChat: (agentId, text) => {
+      const trimmedText = text.trim()
+      if (!trimmedText) return
+      ptyWrite(agentId, `${trimmedText}\r`)
+      set((state) => ({
+        chats: { ...state.chats, [agentId]: appendUserMessage(state.chats[agentId] ?? [], trimmedText) },
+      }))
+    },
 
     spawnAgent: async (kind, groupId) => {
       if (!isDesktop) {
@@ -221,6 +240,8 @@ export const useAgentGroupStore = create<AgentState>((set, get) => {
             startedAt: Date.now(),
           },
         },
+        chats: { ...state.chats, [id]: [] },
+        views: { ...state.views, [id]: 'terminal' },
         focusedAgentId: id,
       }))
 
