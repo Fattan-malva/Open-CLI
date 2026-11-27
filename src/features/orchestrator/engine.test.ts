@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { defaultEngineContext, planRun, type EngineContext } from './engine'
+import { validateDag } from './dag'
 import { Run, type RunValue, type TaskValue } from './types'
 
 const timestamp = '2026-01-01T00:00:00.000Z'
@@ -72,6 +73,8 @@ function contextWithPlan() {
     },
     waitForArtifact: async () => true,
     readArtifact: async (path) => artifacts.get(path) ?? '',
+    // The Rust DAG validator is covered by `cargo test`; the browser test uses the TS reference.
+    validateDag: async (tasks) => validateDag(tasks as Parameters<typeof validateDag>[0]),
   }
   return { ctx, runs, tasks, events }
 }

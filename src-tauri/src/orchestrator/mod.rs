@@ -1,6 +1,7 @@
 pub mod browser_bridge;
 pub mod commands;
 pub mod git;
+pub mod logic;
 pub mod store;
 
 use crate::PtyState;

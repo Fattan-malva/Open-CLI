@@ -1,11 +1,17 @@
 import * as api from './api'
 import { buildTaskPrompt, clamp } from './context'
-import { validateDag } from './dag'
 import { generatePlan } from './planner'
-import { selectDispatchable, shouldUnblock } from './scheduler'
 import { isTerminalTaskState } from './state-machines'
-import { Evidence, Task, type EvidenceValue, type RunValue, type SnapshotValue, type TaskValue } from './types'
-import { buildReport, validateEvidence } from './validation'
+import {
+  Evidence,
+  Task,
+  type AgentSessionValue,
+  type EvidenceValue,
+  type RunValue,
+  type SnapshotValue,
+  type TaskValue,
+  type WorkspaceValue,
+} from './types'
 
 export type EngineContext = {
   snapshot: () => Promise<SnapshotValue>
@@ -24,6 +30,14 @@ export type EngineContext = {
   dispatch: typeof api.dispatchTask
   runCommand: typeof api.runCommand
   integrate: typeof api.integrateWorkspace
+  validateDag: (tasks: api.DagInput[]) => Promise<api.DagValidationResult>
+  selectDispatchable: (input: api.SchedulerRequest) => Promise<api.DispatchDecisionResult[]>
+  shouldUnblock: (tasks: api.DagInput[], completedId: string) => Promise<string[]>
+  validateEvidence: (
+    acceptance: string[],
+    evidence: EvidenceValue | null
+  ) => Promise<api.EvidenceValidationResult>
+  buildReport: (input: api.ReportRequest) => Promise<api.FinalReportResult>
 }
 
 export const defaultEngineContext: EngineContext = {
@@ -43,6 +57,31 @@ export const defaultEngineContext: EngineContext = {
   dispatch: api.dispatchTask,
   runCommand: api.runCommand,
   integrate: api.integrateWorkspace,
+  validateDag: api.validateDagNative,
+  selectDispatchable: api.selectDispatchableNative,
+  shouldUnblock: api.shouldUnblockNative,
+  validateEvidence: api.validateEvidenceNative,
+  buildReport: api.buildReportNative,
+}
+
+function toDagInput(task: TaskValue | api.DagInput): api.DagInput {
+  return {
+    id: task.id,
+    dependencies: task.dependencies,
+    acceptance: task.acceptance ?? [],
+    scope: task.scope,
+    risk: task.risk ?? 'medium',
+    status: 'status' in task ? task.status : undefined,
+  }
+}
+
+function toSchedulerTask(task: TaskValue): api.SchedulerRequest['tasks'][number] {
+  return {
+    dag: toDagInput(task),
+    attempt: task.attempt,
+    workspaceId: task.workspaceId,
+    requiredCapabilities: task.requiredCapabilities ?? [],
+  }
 }
 
 export function newId(prefix: string): string {
@@ -123,7 +162,7 @@ export async function planRun(
     waitForArtifact: ctx.waitForArtifact,
     readArtifact: ctx.readArtifact,
   })
-  const validation = validateDag(plan.tasks)
+  const validation = await ctx.validateDag(plan.tasks.map(toDagInput))
   if (!validation.ok) throw new Error(`Invalid plan: ${validation.issues.map((issue) => issue.message).join('; ')}`)
   const timestamp = now()
   const tasks: TaskValue[] = plan.tasks.map((draft, index) =>
@@ -212,14 +251,27 @@ export async function executeRun(ctx: EngineContext, runId: string): Promise<Sna
     const current = snapshot.tasks.filter((task) => task.runId === runId)
     const activeBySession = new Map<string, string>()
     for (const [sessionId, value] of active) activeBySession.set(sessionId, value.taskId)
-    const decisions = selectDispatchable({
-      tasks: current,
-      agents: snapshot.agents,
-      workspaces: snapshot.workspaces,
-      settings: run.settings,
-      criticalPath: validateDag(current).criticalPath,
-      activeBySession,
+    const criticalPath = (await ctx.validateDag(current.map(toDagInput))).criticalPath
+    const decisionRows = await ctx.selectDispatchable({
+      tasks: current.map(toSchedulerTask),
+      agents: snapshot.agents.map((agent) => ({
+        id: agent.id,
+        capabilities: agent.capabilities,
+        status: agent.status,
+      })),
+      workspaces: snapshot.workspaces.map((workspace) => ({ id: workspace.id })),
+      settings: {
+        maxConcurrentAgents: run.settings.maxConcurrentAgents,
+        maxRetries: run.settings.maxRetries,
+      },
+      criticalPath,
+      activeBySession: Object.fromEntries(activeBySession),
     })
+    const decisions = decisionRows.map((row) => ({
+      task: current.find((task) => task.id === row.taskId) as TaskValue,
+      session: snapshot.agents.find((agent) => agent.id === row.sessionId) as AgentSessionValue,
+      workspace: snapshot.workspaces.find((workspace) => workspace.id === row.workspaceId) as WorkspaceValue,
+    }))
     for (const decision of decisions) {
       const attempt = decision.task.attempt + 1
       const assigned: TaskValue = {
@@ -300,7 +352,7 @@ export async function executeRun(ctx: EngineContext, runId: string): Promise<Sna
         continue
       }
       const task = await loadTask(ctx, value.taskId)
-      const validation = validateEvidence(task, evidence)
+      const validation = await ctx.validateEvidence(task.acceptance, evidence)
       const completed: TaskValue = {
         ...task,
         evidence,
@@ -329,15 +381,15 @@ export async function executeRun(ctx: EngineContext, runId: string): Promise<Sna
           updatedAt: now(),
         })
         await emit(ctx, runId, completed.id, 'task.completed', {})
-        for (const candidate of shouldUnblock(current, completed.id)) {
+        for (const candidateId of await ctx.shouldUnblock(current.map(toDagInput), completed.id)) {
           const unblocked: TaskValue = {
-            ...(await loadTask(ctx, candidate.id)),
+            ...(await loadTask(ctx, candidateId)),
             status: 'ready',
             blocker: null,
             updatedAt: now(),
           }
           await ctx.putTask(unblocked)
-          await emit(ctx, runId, candidate.id, 'dependency.satisfied', { dependency: completed.id })
+          await emit(ctx, runId, candidateId, 'dependency.satisfied', { dependency: completed.id })
         }
       }
       active.delete(sessionId)
@@ -348,7 +400,23 @@ export async function executeRun(ctx: EngineContext, runId: string): Promise<Sna
   const finalSnapshot = await ctx.snapshot()
   const finalTasks = finalSnapshot.tasks.filter((task) => task.runId === runId)
   const finalRun = finalSnapshot.runs.find((item) => item.id === runId) ?? run
-  const report = buildReport(finalRun, finalTasks, finalSnapshot.workspaces, finalSnapshot.events)
+  const report = await ctx.buildReport({
+    runId: finalRun.id,
+    state: finalRun.state,
+    planRisks: finalRun.plan?.risks ?? [],
+    tasks: finalTasks.map((task) => ({
+      id: task.id,
+      status: task.status,
+      outputRefs: task.outputRefs,
+      blocker: task.blocker,
+      evidence: task.evidence,
+    })),
+    workspaces: finalSnapshot.workspaces.map((workspace) => ({
+      id: workspace.id,
+      dirtyAtCreate: workspace.dirtyAtCreate,
+    })),
+    validationEventCount: finalSnapshot.events.filter((event) => event.type === 'validation.result').length,
+  })
   const anyFailed = finalTasks.some((task) => ['failed', 'conflict', 'cancelled'].includes(task.status))
   const state = finalRun.state === 'cancelled'
     ? 'cancelled'

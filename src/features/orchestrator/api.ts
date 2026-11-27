@@ -20,6 +20,95 @@ export type WorkspaceStatus = {
   branch: string
 }
 
+export type DagInput = {
+  id: string
+  dependencies: string[]
+  acceptance: string[]
+  scope: { allowedPaths: string[]; forbiddenPaths: string[]; interfaces: string[] }
+  risk: 'low' | 'medium' | 'high'
+  status?: string
+}
+
+export type DagValidationResult = {
+  ok: boolean
+  issues: { code: string; message: string; taskIds: string[] }[]
+  order: string[]
+  criticalPath: string[]
+}
+
+export type SchedulerRequest = {
+  tasks: {
+    dag: DagInput
+    attempt: number
+    workspaceId: string | null
+    requiredCapabilities: string[]
+  }[]
+  agents: { id: string; capabilities: string[]; status: string }[]
+  workspaces: { id: string }[]
+  settings: { maxConcurrentAgents: number; maxRetries: number }
+  criticalPath: string[]
+  activeBySession: Record<string, string>
+}
+
+export type DispatchDecisionResult = {
+  taskId: string
+  sessionId: string
+  workspaceId: string
+}
+
+export type ReportRequest = {
+  runId: string
+  state: string
+  planRisks: string[]
+  tasks: {
+    id: string
+    status: string | null
+    outputRefs: string[]
+    blocker: string | null
+    evidence: unknown
+  }[]
+  workspaces: { id: string; dirtyAtCreate: boolean }[]
+  validationEventCount: number
+}
+
+export type FinalReportResult = {
+  runId: string
+  state: string
+  integrated: { status: string; tasks: string[]; note: string }
+  completedNotIntegrated: { status: string; tasks: string[]; note: string }
+  blockedOrFailed: { status: string; tasks: string[]; note: string }
+  tests: { passed: number; failed: number; notRun: number }
+  filesChanged: string[]
+  conflicts: string[]
+  risks: string[]
+}
+
+export type EvidenceValidationResult = { ok: boolean; reasons: string[] }
+
+/** Pure DAG, scheduling, validation and report logic runs natively in Rust. */
+export function validateDagNative(tasks: DagInput[]): Promise<DagValidationResult> {
+  return invoke<DagValidationResult>('orchestrator_validate_dag', { tasks })
+}
+
+export function shouldUnblockNative(tasks: DagInput[], completedId: string): Promise<string[]> {
+  return invoke<string[]>('orchestrator_should_unblock', { tasks, completedId })
+}
+
+export function selectDispatchableNative(input: SchedulerRequest): Promise<DispatchDecisionResult[]> {
+  return invoke<DispatchDecisionResult[]>('orchestrator_select_dispatchable', { input })
+}
+
+export function validateEvidenceNative(
+  acceptance: string[],
+  evidence: unknown
+): Promise<EvidenceValidationResult> {
+  return invoke<EvidenceValidationResult>('orchestrator_validate_evidence', { acceptance, evidence })
+}
+
+export function buildReportNative(input: ReportRequest): Promise<FinalReportResult> {
+  return invoke<FinalReportResult>('orchestrator_build_report', { input })
+}
+
 export type CommandResult = {
   exitCode: number | null
   output: string

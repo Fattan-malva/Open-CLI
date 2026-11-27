@@ -1636,7 +1636,15 @@ pub fn run() {
             orchestrator::commands::orchestrator_integrate,
             orchestrator::commands::orchestrator_recover,
             orchestrator::commands::orchestrator_browser_bridge_start,
-            orchestrator::commands::orchestrator_browser_bridge_stop
+            orchestrator::commands::orchestrator_browser_bridge_stop,
+            orchestrator::logic::commands::orchestrator_validate_dag,
+            orchestrator::logic::commands::orchestrator_select_dispatchable,
+            orchestrator::logic::commands::orchestrator_should_unblock,
+            orchestrator::logic::commands::orchestrator_validate_evidence,
+            orchestrator::logic::commands::orchestrator_build_report,
+            orchestrator::logic::commands::orchestrator_can_transition_run,
+            orchestrator::logic::commands::orchestrator_can_transition_task,
+            orchestrator::logic::commands::orchestrator_can_transition_agent
         ])
         .setup(|app| {
             if let Err(error) = ensure_agent_cli_file(app.handle()) {
